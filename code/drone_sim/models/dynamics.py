@@ -9,7 +9,7 @@
     θ̈ = u3 / J_theta
     ψ̈ = u4 / J_psi
 
-Физические параметры задаются через QuadModel (quad_model.py).
+Физические параметры задаются через QuadModel (models/quad_model.py).
 При QuadModel() (defaults: mass=1, J=1, g=9.81) уравнения совпадают
 с нормализованной моделью диссертации.
 
@@ -31,7 +31,7 @@ u1 и u2 — выходы двойных интеграторов:
 from __future__ import annotations
 import numpy as np
 
-from quad_model import QuadModel
+from drone_sim.models.quad_model import QuadModel
 
 G = 9.81  # ускорение свободного падения, м/с² (константа для обратной совместимости)
 

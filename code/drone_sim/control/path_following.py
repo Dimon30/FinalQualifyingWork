@@ -41,18 +41,13 @@ path_following.py
 from __future__ import annotations
 import numpy as np
 from typing import Optional
-import sys, os
 
-# Поддержка запуска как из code/, так и из корня
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_CODE = os.path.dirname(_HERE)
-if _CODE not in sys.path:
-    sys.path.insert(0, _CODE)
-
-from dynamics import G, sat_tanh, sat_tanh_vec, thrust_direction
-from quad_model import QuadModel
-from controllers.common import HighGainParams, DerivativeObserver4
-from geometry import CurveGeom, se_from_pose, nearest_point_line, spiral_nearest_observer_step
+from drone_sim.models.dynamics import G, sat_tanh, sat_tanh_vec, thrust_direction
+from drone_sim.models.quad_model import QuadModel
+from drone_sim.control.common import HighGainParams, DerivativeObserver4
+from drone_sim.geometry.curves import (
+    CurveGeom, se_from_pose, nearest_point_line, spiral_nearest_observer_step
+)
 
 
 def W_mat(alpha: float, beta: float, eps: float) -> np.ndarray:

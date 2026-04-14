@@ -23,6 +23,7 @@ out/
 code/out_images/
 legacy/
 auxil/
+code/ml/data/
 
 *.log
 *.tmp

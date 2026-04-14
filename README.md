@@ -12,37 +12,57 @@
 Проект реализует алгоритм **согласованного управления по выходу** (Глава 4 диссертации):
 движение квадрокоптера вдоль произвольной пространственной кривой с заданной скоростью.
 
-Центральный модуль — **`drone_path_sim`** — универсальный публичный интерфейс для:
-- задания физических параметров дрона (`QuadModel`)
-- задания произвольной кривой (`make_curve`)
-- настройки и запуска симуляции (`SimConfig`, `simulate_path_following`)
-- анализа результатов (`SimResult`)
+Весь код оформлен в виде Python-пакета **`drone_sim`**, который предоставляет:
+- задание физических параметров дрона (`QuadModel`)
+- задание произвольной кривой (`make_curve`)
+- настройку и запуск симуляции (`SimConfig`, `simulate_path_following`)
+- анализ результатов (`SimResult`)
 
 ---
 
 ## Быстрый старт
 
 ```bash
-pip install numpy matplotlib
+pip install numpy matplotlib pytest
 
 # Сценарии из диссертации (Гл. 4)
-python code/run_ch4_line.py     # согласованное управление (прямая)
-python code/run_ch4_spiral.py   # согласованное управление (спираль r=3)
+python code/scenarios/run_ch4_line.py     # согласованное управление (прямая)
+python code/scenarios/run_ch4_spiral.py   # согласованное управление (спираль r=3)
 
-# Тесты базовых кривых (6 сценариев, PASS/FAIL)
-python code/test_curves.py
+# Тесты (6 кривых, PASS/FAIL)
+pytest code/tests/
+pytest code/tests/ --fast    # ускоренный прогон (T×0.25)
 ```
 
 Графики сохраняются в `code/out_images/`.
 
 ---
 
-## Использование drone_path_sim
+## Использование пакета drone_sim
 
-### Шаг 1. Задать параметры дрона (QuadModel)
+Пакет `drone_sim` находится в директории `code/`. Чтобы импорты работали,
+**запускайте скрипты из директории `code/`** или добавьте её в `PYTHONPATH`:
+
+```bash
+# Вариант 1: запускать из code/
+cd code
+python my_script.py
+
+# Вариант 2: указать PYTHONPATH при запуске из корня
+PYTHONPATH=code python my_script.py   # Linux/macOS
+$env:PYTHONPATH="code"; python my_script.py  # Windows PowerShell
+```
+
+После этого во всех скриптах:
 
 ```python
-from drone_path_sim import QuadModel
+from drone_sim import make_curve, SimConfig, simulate_path_following
+```
+
+### Шаг 1. Задать параметры дрона
+
+```python
+from drone_sim import QuadModel
 
 # Нормализованная модель диссертации (значения по умолчанию)
 model = QuadModel()
@@ -58,15 +78,13 @@ model = QuadModel(
 ```
 
 > При изменении `mass` или `J` регуляторные коэффициенты (`kappa`, `gamma`) требуют
-> перенастройки — они нормированы под модель диссертации (mass=1, J=1).
+> перенастройки — они нормированы под нормализованную модель (mass=1, J=1).
 
 ### Шаг 2. Задать кривую
 
-Кривая задаётся параметрически — функцией `p(s) → [x, y, z]`, где `s` — вещественный параметр.
-
 ```python
 import numpy as np
-from drone_path_sim import make_curve
+from drone_sim import make_curve
 
 # Круговая спираль: x=r·cos(s), y=r·sin(s), z=s
 curve = make_curve(lambda s: np.array([3.0*np.cos(s), 3.0*np.sin(s), s]))
@@ -81,65 +99,64 @@ curve = make_curve(lambda s: np.array([3.0*np.cos(s), 3.0*np.sin(s), 5.0]))
 curve = make_curve(lambda s: np.array([s, 0.3*s**2, 0.2*s]))
 ```
 
-`make_curve` автоматически вычисляет все геометрические характеристики
+`make_curve` автоматически вычисляет геометрические характеристики
 через численное дифференцирование: касательный вектор, углы рысканья и тангажа, кривизну.
 
-Готовые кривые из `geometry.py`:
+Готовые кривые:
 
 ```python
-from geometry import spiral_curve, line_xyz_curve
+from drone_sim.geometry import spiral_curve, line_xyz_curve
+
 curve = spiral_curve(r=3.0)   # спираль r=3 (как в диссертации)
 curve = line_xyz_curve()      # прямая x=s, y=s, z=s
 ```
 
-### Шаг 3. Настроить параметры симуляции (SimConfig)
+### Шаг 3. Настроить параметры симуляции
 
 ```python
-from drone_path_sim import SimConfig, QuadModel
+from drone_sim import SimConfig, QuadModel
 
 cfg = SimConfig(
-    quad_model=QuadModel(),  # параметры дрона (None → нормализованная модель)
+    quad_model=QuadModel(),  # None → нормализованная модель
 
     Vstar=1.0,           # желаемая параметрическая скорость [м/с]
     T=30.0,              # время симуляции [с]
     dt=0.002,            # шаг интегрирования RK4 [с]
-    x0=None,             # начальное состояние 16D (None → старт на кривой в s=zeta0)
+    x0=None,             # начальное состояние 16D (None → старт на кривой в zeta0)
 
-    # Параметры регулятора (из диссертации стр. 44)
     kappa=200.0,
     a=(5., 10., 10., 5., 1.),
     gamma=(1., 3., 5., 3., 1.),
     L=5.0,
     ell=0.9,
 
-    # Параметры наблюдателя ближайшей точки
-    gamma_nearest=1.0,
+    gamma_nearest=1.0,   # коэффициент наблюдателя ближайшей точки
     zeta0=0.0,
 )
 ```
 
-**Задание начального положения дрона:**
+**Задание начального положения:**
 
 ```python
 import numpy as np
 
-# Вариант А: старт точно на кривой в точке s=zeta0 (по умолчанию)
+# Вариант А: старт на кривой в точке zeta0 (по умолчанию)
 cfg = SimConfig(x0=None, zeta0=0.0)
 
 # Вариант Б: произвольное начальное положение
 x0 = np.zeros(16)
-x0[0:3] = np.array([2.9, 0.0, 0.0])   # координаты [x, y, z]
+x0[0:3] = np.array([2.9, 0.0, 0.0])   # [x, y, z]
 cfg = SimConfig(x0=x0)
 ```
 
 Структура вектора состояния 16D:
 ```
-x[0:3]   = [x, y, z]                  — положение
-x[3:6]   = [vx, vy, vz]               — скорость
-x[6:9]   = [phi, theta, psi]          — углы: рысканье, тангаж, крен
-x[9:12]  = [phidot, thetadot, psidot] — угловые скорости
-x[12:14] = [u1_bar, rho1]             — интегратор тяги
-x[14:16] = [u2, rho2]                 — интегратор рысканья
+x[0:3]   = [x, y, z]                   — положение
+x[3:6]   = [vx, vy, vz]                — скорость
+x[6:9]   = [phi, theta, psi]           — рысканье, тангаж, крен
+x[9:12]  = [phidot, thetadot, psidot]  — угловые скорости
+x[12:14] = [u1_bar, rho1]              — интегратор тяги
+x[14:16] = [u2, rho2]                  — интегратор рысканья
 ```
 
 **Подбор kappa и dt:**
@@ -147,13 +164,13 @@ x[14:16] = [u2, rho2]                 — интегратор рысканья
 | kappa | Рекомендуемый dt | Применение |
 |-------|-----------------|------------|
 | 100   | ≤ 0.010 с       | Простые кривые, тестирование |
-| 200   | ≤ 0.005 с       | Стандарт (диссертация, Гл. 4) |
+| 200   | ≤ 0.005 с       | Стандарт диссертации (Гл. 4) |
 | 300   | ≤ 0.002 с       | Высокая точность/кривизна |
 
 ### Шаг 4. Запустить симуляцию
 
 ```python
-from drone_path_sim import simulate_path_following
+from drone_sim import simulate_path_following
 
 result = simulate_path_following(curve, cfg)
 ```
@@ -161,25 +178,20 @@ result = simulate_path_following(curve, cfg)
 ### Шаг 5. Анализ результатов
 
 ```python
-# Вывести финальные ошибки в консоль
-result.print_summary()
-
-# Сохранить все графики
-result.plot("out_images/my_curve", prefix="run1")
+result.print_summary()                          # финальные ошибки в консоль
+result.plot("out_images/my_curve", prefix="r")  # сохранить 6 графиков
 ```
-
-Сохраняемые графики:
 
 | Файл | Содержание |
 |------|-----------|
-| `run1_traj_3d.png` | 3D траектория дрона и заданной кривой |
-| `run1_traj_xy.png` | Проекция X-Y |
-| `run1_errors.png` | Ошибки: `s_arc − V*·t`, `e1`, `e2` |
-| `run1_yaw_error.png` | Ошибка рысканья `δφ` |
-| `run1_velocity.png` | Скорость `‖v‖` и желаемая `V*` |
-| `run1_angles.png` | Угловые координаты φ, θ, ψ |
+| `r_traj_3d.png` | 3D траектория дрона и заданной кривой |
+| `r_traj_xy.png` | Проекция X-Y |
+| `r_errors.png` | Ошибки: `s_arc − V*·t`, `e1`, `e2` |
+| `r_yaw_error.png` | Ошибка рысканья `δφ` |
+| `r_velocity.png` | Скорость `‖v‖` и желаемая `V*` |
+| `r_angles.png` | Угловые координаты φ, θ, ψ |
 
-Числовые данные доступны напрямую:
+Числовые данные:
 
 ```python
 result.t          # массив времени [n]
@@ -194,17 +206,16 @@ result.zeta       # параметр ближайшей точки [n]
 
 ```python
 import numpy as np
-from drone_path_sim import make_curve, SimConfig, QuadModel, simulate_path_following
+from drone_sim import make_curve, SimConfig, QuadModel, simulate_path_following
 
 # Наклонная эллиптическая спираль
 curve = make_curve(lambda s: np.array([4.0*np.cos(s), 2.0*np.sin(s), 0.5*s]))
 
-# Параметры дрона и симуляции
 x0 = np.zeros(16)
 x0[0:3] = np.array([3.8, 0.0, 0.0])
 
 cfg = SimConfig(
-    quad_model=QuadModel(),   # нормализованная модель диссертации
+    quad_model=QuadModel(),
     Vstar=1.0, T=40.0, dt=0.002, x0=x0, kappa=200.0,
 )
 
@@ -213,43 +224,51 @@ result.print_summary()
 result.plot("out_images/elliptic_helix")
 ```
 
-### Ограничения и рекомендации
+### Рекомендации и ограничения
 
 **Равномерная параметризация.**
-Для точности метрики `s_arc = ζ·‖t(ζ)‖` рекомендуется кривая с постоянной нормой
-касательного вектора (`‖dp/ds‖ = const`). Стандартные кривые (круговая спираль, прямая)
-удовлетворяют этому условию.
+Для точности `s_arc = ζ·‖t(ζ)‖` рекомендуются кривые с постоянной нормой касательного
+вектора (`‖dp/ds‖ = const`). Стандартные кривые (спираль, прямая) удовлетворяют этому.
 
 **Выбор gamma_nearest.**
-
 ```python
-# Правило: gamma_nearest >= 1.0 / (||t(s)||^2 * dt)
-# Для спирали p(s)=[r·cos(s), r·sin(s), s]:  ||t||^2 = r^2 + 1
-#   r=3: gamma=1    r=2: gamma=3    r=1.5: gamma=20
+# Условие устойчивости дискретного наблюдателя:
+#   0 < gamma * dt * ||t||^2_max < 2
+#   => gamma < 2 / (||t||^2_max * dt)
+#
+# Для равномерных спиралей ||t||^2 = r^2 + 1 = const:
+#   r=3:   ||t||^2=10,   gamma < 100,  используем gamma=1
+#   r=2:   ||t||^2=5,    gamma < 200,  используем gamma=3
+#   r=1.5: ||t||^2=3.25, gamma < 308,  используем gamma=20
+#
+# Для неравномерных кривых (эллипс, парабола) ||t||^2 меняется —
+# ограничение считается по МАКСИМУМУ ||t||^2:
+#   эллипс [4cos,2sin,0.5s]: ||t||^2 in [4.25, 16.25] => gamma < 61.5, берём gamma=5
 ```
 
 **Прямые кривые.**
-Для прямых NearestPointObserver нестабилен — используйте аналитическую `nearest_fn`:
-
+Для прямых `NearestPointObserver` нестабилен — используйте аналитическую `nearest_fn`:
 ```python
-from geometry import nearest_point_line
+from drone_sim.geometry import nearest_point_line
+
 cfg = SimConfig(..., nearest_fn=nearest_point_line)
 ```
 
-**Начальное положение.**
-Дрон должен стартовать вблизи кривой (расстояние ≲ 1–2 м).
+**Начальное положение.** Дрон должен стартовать вблизи кривой (≲ 1–2 м).
 
 ---
 
 ## Тесты
 
 ```bash
-python code/test_curves.py        # полные тесты (6 кривых)
-python code/test_curves.py --fast # быстрый прогон (T×0.25)
+pytest code/tests/           # все 6 тестов
+pytest code/tests/ -v        # с именами
+pytest code/tests/ -k helix  # по маске имени
+pytest code/tests/ --fast    # быстрый прогон (T×0.25)
 ```
 
-Запускает 6 тестовых сценариев, сохраняет графики в `code/out_images/tests/`
-и выводит PASS/FAIL по каждому тесту.
+Тесты запускают 6 сценариев (спираль r=3, окружность, спираль r=2, прямые, спираль r=1.5),
+сохраняют графики в `code/out_images/tests/` и проверяют `‖[e1,e2]‖_final < 1.5 м`.
 
 ---
 
@@ -257,23 +276,22 @@ python code/test_curves.py --fast # быстрый прогон (T×0.25)
 
 ```
 code/
-  quad_model.py         — QuadModel: физические параметры дрона
-  drone_path_sim.py     — публичный API: произвольная кривая + симуляция
-  dynamics.py           — динамика квадрокоптера (16D, использует QuadModel)
-  geometry.py           — геометрия кривых, ошибки в системе Френе
-  sim.py                — основной цикл симуляции (RK4)
-  plotting.py           — визуализация результатов
-  integrators.py        — интегратор RK4
-  controllers/
-    common.py           — HighGainParams, наблюдатель производных
-    path_following.py   — регулятор согласованного управления (Гл. 4)
-  run_ch4_line.py       — сценарий: согласованное управление (прямая)
-  run_ch4_spiral.py     — сценарий: согласованное управление (спираль r=3)
-  test_curves.py        — тесты базовых кривых (6 сценариев)
+  drone_sim/            — Python-пакет
+    models/             — QuadModel, динамика (quad_dynamics_16, sat_tanh)
+    geometry/           — CurveGeom, кривые, ошибки Френе
+    control/            — HighGainParams, Ch4PathController, W_mat, b_mat
+    simulation/         — rk4_step, simulate, PathFollowingController, SimConfig, SimResult
+    visualization/      — функции построения графиков
+    nn/                 — placeholder: нейросетевые алгоритмы V*
+  scenarios/
+    run_ch4_line.py     — сценарий: прямая (диссертация стр. 41)
+    run_ch4_spiral.py   — сценарий: спираль r=3 (диссертация стр. 43–44)
+  tests/
+    test_curves.py      — pytest: 6 кривых
 
-legacy/ch2_ch3/         — архив рабочих симуляций Глав 2–3 (см. README там)
+legacy/                 — архив симуляций Гл. 2–3 (не трогать)
 report/                 — LaTeX-исходники отчёта
-Диссертация на сайт.pdf — исходная диссертация (математика)
+Диссертация на сайт.pdf — математическая основа
 ```
 
 ---
@@ -282,7 +300,7 @@ report/                 — LaTeX-исходники отчёта
 
 ### Динамика квадрокоптера (уравнения 52–55 диссертации)
 
-**Соглашение об углах**: φ = рысканье (yaw), θ = тангаж (pitch), ψ = крен (roll).
+**Соглашение об углах** (нестандартное): φ = рысканье (yaw), θ = тангаж (pitch), ψ = крен (roll).
 
 ```
 ṗ = v
@@ -290,13 +308,13 @@ v̇ = (b(φ,θ,ψ)·(u1 + g) − [0, 0, g]) / mass
 φ̈ = u2 / J_phi,   θ̈ = u3 / J_theta,   ψ̈ = u4 / J_psi
 ```
 
-Цепочки двойных интеграторов:
+Цепочки двойных интеграторов (расширение состояния):
 ```
 ρ̇1 = v1,   u̇1_bar = ρ1,   u1 = L·tanh(u1_bar / L)   — тяга
 ρ̇2 = v2,   u̇2 = ρ2                                   — рысканье
 ```
 
-### Алгоритм согласованного управления (Гл. 4 / drone_path_sim)
+### Алгоритм согласованного управления (Гл. 4)
 
 1. **Наблюдатель ближайшей точки** (Лемма 3):
    `ζ̇ = −γ · sign(∂H/∂ζ) · H(ζ, x)`,   `H = (p(ζ) − x) · t(ζ)`
@@ -315,10 +333,11 @@ v̇ = (b(φ,θ,ψ)·(u1 + g) − [0, 0, g]) / mass
 ## Зависимости
 
 - Python 3.9+
-- numpy
-- matplotlib
+- numpy, matplotlib, pytest
 
 ```bash
+pip install numpy matplotlib pytest
+# или
 pip install -r requirements.txt
 ```
 
@@ -327,4 +346,4 @@ pip install -r requirements.txt
 ## Планируемые расширения
 
 - Замена константного `V*` на нейросетевой алгоритм (RL: PPO/SAC) для адаптивного
-  выбора оптимальной скорости движения вдоль траектории.
+  выбора оптимальной скорости движения вдоль траектории. Заготовка: `drone_sim/nn/`.

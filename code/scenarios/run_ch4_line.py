@@ -8,17 +8,17 @@
 """
 import os
 import sys
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
-from dynamics import quad_dynamics_16, sat_tanh
-from controllers.ch4_path import Ch4PathController
-from controllers.common import HighGainParams
-from geometry import line_xyz_curve, se_from_pose, nearest_point_line
-from sim import simulate
-from plotting import ensure_out, plot_3d_traj, plot_errors, plot_velocity
+from drone_sim.models.dynamics import quad_dynamics_16, sat_tanh
+from drone_sim.control.path_following import Ch4PathController
+from drone_sim.control.common import HighGainParams
+from drone_sim.geometry.curves import line_xyz_curve, se_from_pose, nearest_point_line
+from drone_sim.simulation.runner import simulate
+from drone_sim.visualization.plotting import ensure_out, plot_3d_traj, plot_errors, plot_velocity
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "code/out_images", "ch4_line")
+OUT = os.path.join(os.path.dirname(__file__), "..", "out_images", "ch4_line")
 L = 5.0
 Vstar = 1.0
 
@@ -28,7 +28,6 @@ def main():
 
     curve = line_xyz_curve()
 
-    # Параметры из диссертации стр. 41
     params = HighGainParams(
         kappa=100.0,
         a=(5.0, 10.0, 10.0, 5.0, 1.0),
@@ -44,7 +43,6 @@ def main():
         use_spiral_observer=False,
     )
 
-    # Начальное состояние: x0=(1,1,0)
     x0 = np.zeros(16)
     x0[0:3] = np.array([1.0, 1.0, 0.0])
 
@@ -60,11 +58,9 @@ def main():
     t = res["t"]
     x = res["x"]
 
-    # Ближайшие точки на прямой
     s_arr = np.array([nearest_point_line(x[k, 0:3]) for k in range(len(t))])
     p_ref = np.stack([curve.p(s) for s in s_arr], axis=0)
 
-    # Ошибки s, e1, e2  (s_arc = ζ·√3 — длина дуги для прямой x=s,y=s,z=s)
     tangent_norm_line = np.sqrt(3.0)
     errors = np.zeros((len(t), 3))
     for k in range(len(t)):
@@ -73,12 +69,10 @@ def main():
         s_arc = s * tangent_norm_line
         errors[k] = [s_arc - Vstar * t[k], e1, e2]
 
-    # Скорость
     vel = np.linalg.norm(x[:, 3:6], axis=1)
 
     plot_3d_traj(
-        p_ref=p_ref,
-        p_real=x[:, 0:3],
+        p_ref=p_ref, p_real=x[:, 0:3],
         outpath=os.path.join(OUT, "ch4_line_3d.png"),
         title="Глава 4: согласованное управление (прямая)"
     )

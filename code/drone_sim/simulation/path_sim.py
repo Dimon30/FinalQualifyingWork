@@ -1,6 +1,6 @@
 """
-drone_path_sim.py
-=================
+path_sim.py
+===========
 Согласованное управление квадрокоптером по произвольной гладкой кривой.
 
 Реализует алгоритм Главы 4 диссертации Ким С.А. (2024) в виде удобного API.
@@ -27,15 +27,10 @@ drone_path_sim.py
         ...
         sigma_dot = kappa^5 * a5 * (lambda_1 - lambda_hat_1)
 
-Замечание по параметризации:
-    Для точности метрики s_arc рекомендуется использовать равномерную (дуговую)
-    параметризацию кривой, при которой ||dp/ds|| = const. В этом случае
-    s_arc = zeta * ||t|| точно совпадает с длиной дуги и ṡ_arc -> V*.
-
 Пример использования::
 
     import numpy as np
-    from drone_path_sim import make_curve, SimConfig, simulate_path_following
+    from drone_sim import make_curve, SimConfig, simulate_path_following
 
     # Эллиптическая спираль: a=3, b=2, подъём 0.5 рад/м
     curve = make_curve(lambda s: np.array([3*np.cos(s), 2*np.sin(s), 0.5*s]))
@@ -49,7 +44,6 @@ drone_path_sim.py
 from __future__ import annotations
 
 import os
-import sys
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -57,19 +51,12 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-# ---------------------------------------------------------------------------
-# Путь к модулям проекта: поддержка запуска как из code/, так и из корня
-# ---------------------------------------------------------------------------
-_HERE = os.path.dirname(os.path.abspath(__file__))
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-from dynamics import quad_dynamics_16, sat_tanh, sat_tanh_vec, G
-from quad_model import QuadModel
-from controllers.common import HighGainParams, DerivativeObserver4
-from controllers.path_following import W_mat, W_inv, b_mat, _safe_inv4
-from geometry import CurveGeom, se_from_pose
-from sim import simulate as _simulate_raw
+from drone_sim.models.dynamics import quad_dynamics_16, sat_tanh, sat_tanh_vec, G
+from drone_sim.models.quad_model import QuadModel
+from drone_sim.control.common import HighGainParams, DerivativeObserver4
+from drone_sim.control.path_following import W_mat, W_inv, b_mat, _safe_inv4
+from drone_sim.geometry.curves import CurveGeom, se_from_pose
+from drone_sim.simulation.runner import simulate as _simulate_raw
 
 __all__ = [
     "QuadModel",
@@ -230,12 +217,12 @@ class PathFollowingController:
     Использует:
         - NearestPointObserver (по умолчанию) или nearest_fn для ближайшей точки
         - DerivativeObserver4 для оценки производных вектора ошибок
-        - b_mat, W_mat/W_inv из ch4_path.py
+        - b_mat, W_mat/W_inv из control/path_following.py
         - 16-мерную модель квадрокоптера
 
     Параметры:
         curve             -- геометрия кривой S
-        Vstar             -- желаемая скорость (параметрическая)
+        Vstar             -- желаемая скорость (параметрическая); начальное значение V_ref
         params            -- HighGainParams (kappa, a, gamma, L, ell)
         gamma_nearest     -- коэффициент наблюдателя ближайшей точки (NearestPointObserver)
         zeta0             -- начальное значение параметра
@@ -244,8 +231,10 @@ class PathFollowingController:
                              nearest_fn(p_xyz: np.ndarray) -> float
                              Если задана — используется вместо NearestPointObserver.
                              Пример: nearest_fn=nearest_point_line для прямой x=s,y=s,z=s.
-                             Позволяет избежать лага динамического наблюдателя для
-                             кривых с известным аналитическим решением.
+        speed_fn          -- опциональная функция адаптивного выбора скорости:
+                             speed_fn(state: np.ndarray, s: float) -> float
+                             Если None — используется постоянная скорость Vstar (fallback).
+                             Пример: lambda x, s: predictor.predict(feature_vector(x, curve, s=s))
     """
 
     def __init__(
@@ -258,12 +247,15 @@ class PathFollowingController:
         use_numerical_grad: bool = False,
         nearest_fn: Optional[Callable] = None,
         quad_model: Optional[QuadModel] = None,
+        speed_fn: Optional[Callable] = None,
     ):
         self.curve = curve
-        self.Vstar = float(Vstar)
+        self.Vstar = float(Vstar)          # текущий V_ref (обновляется если speed_fn задана)
         self.p = params
-        self._nearest_fn = nearest_fn  # аналитическая функция (если есть)
+        self._nearest_fn = nearest_fn
         self._model = quad_model if quad_model is not None else QuadModel()
+        self._speed_fn = speed_fn          # None → постоянная скорость (fallback)
+        self._prev_V: float = float(Vstar) # предыдущий V_ref для ограничения ускорения
 
         self._nearest = NearestPointObserver(
             curve=curve,
@@ -280,10 +272,6 @@ class PathFollowingController:
         """Вектор регулируемых переменных lambda_tilde_1.
 
         lambda_tilde_1 = col(s_arc - V*t, e1, e2, delta_phi)
-
-        s_arc = zeta * ||t(zeta)|| -- приближение длины дуги (точно при ||t|| = const)
-        e1, e2 -- боковые ошибки в системе координат Френе (уравнение 60)
-        delta_phi = phi - phi*(zeta) -- ошибка рысканья (нормализована в [-pi, pi])
         """
         _, e1, e2 = se_from_pose(p_xyz, s, self.curve)
         phi_star = float(self.curve.yaw_star(s))
@@ -299,19 +287,7 @@ class PathFollowingController:
         Uprev: Optional[np.ndarray],
         dt: float,
     ) -> np.ndarray:
-        """Один шаг регулятора.
-
-        Аргументы:
-            t     -- текущее время [с]
-            x     -- вектор состояния 16D
-                     [x,y,z, vx,vy,vz, phi,theta,psi, phidot,thetadot,psidot,
-                      u1_bar,rho1, u2,rho2]
-            Uprev -- предыдущее управление (не используется, для совместимости с sim.py)
-            dt    -- шаг времени [с]
-
-        Возвращает:
-            U = [v1, v2, u3, u4] -- управляющий вектор
-        """
+        """Один шаг регулятора. Возвращает U = [v1, v2, u3, u4]."""
         p_xyz = x[0:3]
         phi = float(x[6])
         theta = float(x[7])
@@ -319,14 +295,30 @@ class PathFollowingController:
         u1_bar = float(x[12])
         u1 = sat_tanh(u1_bar, self.p.L)
 
-        # Шаг 1: оценить ближайшую точку на кривой
+        # Шаг 1: ближайшая точка на кривой
         if self._nearest_fn is not None:
             s = float(self._nearest_fn(p_xyz))
-            self._nearest._zeta = s   # синхронизация для свойства .zeta
+            self._nearest._zeta = s
         else:
             s = self._nearest.step(p_xyz, dt)
 
-        # Шаг 2: геометрия кривой в точке s
+        # Адаптивное обновление V_ref (если задан speed_fn)
+        # Fallback: speed_fn is None → self.Vstar остаётся константой
+        if self._speed_fn is not None:
+            try:
+                V_nn = float(self._speed_fn(x, s))
+                # Ограничение ускорения: изменение V_ref не более max_accel * dt за шаг
+                max_dv = self._model.max_accel * dt
+                V_ref = self._prev_V + float(np.clip(V_nn - self._prev_V, -max_dv, max_dv))
+                # Safety: никогда не превышать max_speed
+                V_ref = min(V_ref, self._model.max_speed)
+                self.Vstar = V_ref
+                self._prev_V = V_ref
+            except Exception:
+                # При любой ошибке модели — сохраняем предыдущую скорость (fallback)
+                pass
+
+        # Шаг 2: геометрия в точке s
         alpha = float(self.curve.yaw_star(s))
         beta_val = float(self.curve.beta(s))
         eps_val = float(self.curve.eps(s))
@@ -334,10 +326,10 @@ class PathFollowingController:
         W = W_mat(alpha, beta_val, eps_val)
         Winv = W_inv(alpha, beta_val, eps_val)
 
-        # Шаг 3: вектор ошибок lambda_tilde_1
+        # Шаг 3: вектор ошибок
         lam1 = self._lambda_tilde_1(t, p_xyz, phi, s)
 
-        # Шаг 4: матрица входов b (уравнение из стр. 38, g из QuadModel)
+        # Шаг 4: матрица входов b
         b = b_mat(phi, theta, psi, u1, g=self._model.g)
         binv = _safe_inv4(b)
 
@@ -353,12 +345,11 @@ class PathFollowingController:
         v = -sigma - g1*l1h - g2*l2h - g3*l3h - g4*l4h
         Ubar = sat_tanh_vec(binv @ (Winv @ v), self.p.L)
 
-        # Шаг 7: динамическое eta-расширение (уравнение 71)
+        # Шаг 7: eta-расширение (уравнение 71)
         self._eta += dt * Ubar
         U = g5 * self._eta + Ubar
 
         # Шаг 8: обновление наблюдателя (уравнение 76)
-        # y4_model = W * b * U_bar  (известная часть 4-й производной)
         y4_model = W @ (b @ Ubar)
         self.obs.step(y=lam1, y4_model=y4_model, dt=dt)
 
@@ -389,14 +380,12 @@ class SimConfig:
 
     Атрибуты:
         Vstar          -- желаемая параметрическая скорость V* [м/с]
-                          (для arc-length параметризации = скорость вдоль кривой)
         T              -- время симуляции [с]
         dt             -- шаг интегрирования RK4 [с]
                           Важно: kappa=100 -> dt<=0.01; kappa=200 -> dt<=0.005
         x0             -- начальное состояние 16D (None -> старт в p(zeta0))
         kappa          -- коэффициент усиления наблюдателя производных
         a              -- коэффициенты полинома наблюдателя (5-кортеж)
-                          Гурвицев полином: p^5 + a1*p^4 + ... + a5
         gamma          -- коэффициенты регулятора (5-кортеж):
                           gamma1..gamma4 -- обратная связь по производным ошибки
                           gamma5 -- вес eta-интегратора (динамическое расширение)
@@ -405,35 +394,35 @@ class SimConfig:
         gamma_nearest  -- коэффициент наблюдателя ближайшей точки (Лемма 3)
         zeta0          -- начальное значение параметра кривой
         use_numerical_grad -- True: точный dH/dzeta для наблюдателя ближайшей точки
+        nearest_fn     -- аналитическая функция ближайшей точки (опционально):
+                          nearest_fn(p_xyz: np.ndarray) -> float
+                          Пример: nearest_fn=nearest_point_line для прямой x=s,y=s,z=s
+        quad_model     -- физические параметры дрона; None → нормализованная модель
+        speed_fn       -- адаптивная функция скорости (опционально):
+                          speed_fn(state: np.ndarray, s: float) -> float
+                          None → использовать постоянную скорость Vstar (поведение по умолчанию)
+                          Пример:
+                            from ml.dataset.features import feature_vector
+                            speed_fn = lambda x, s: predictor.predict(feature_vector(x, curve, s=s))
     """
     Vstar: float = 1.0
     T: float = 30.0
     dt: float = 0.002
     x0: Optional[np.ndarray] = None
 
-    # Параметры регулятора (из диссертации стр. 44, сценарий спираль)
     kappa: float = 200.0
     a: tuple = (5.0, 10.0, 10.0, 5.0, 1.0)
     gamma: tuple = (1.0, 3.0, 5.0, 3.0, 1.0)
     L: float = 5.0
     ell: float = 0.9
 
-    # Параметры наблюдателя ближайшей точки
     gamma_nearest: float = 1.0
     zeta0: float = 0.0
     use_numerical_grad: bool = False
 
-    # Аналитическая функция ближайшей точки (опционально)
-    # Если задана — заменяет NearestPointObserver.
-    # Принимает p_xyz: np.ndarray[3], возвращает float (параметр ζ).
-    # Пример для прямой x=s,y=s,z=s:
-    #   from geometry import nearest_point_line
-    #   cfg = SimConfig(..., nearest_fn=nearest_point_line)
     nearest_fn: Optional[Callable] = None
-
-    # Физические параметры квадрокоптера
-    # None → QuadModel() — нормализованная модель диссертации (mass=1, J=1, g=9.81)
     quad_model: Optional[QuadModel] = None
+    speed_fn:   Optional[Callable] = None
 
 
 @dataclass
@@ -443,9 +432,7 @@ class SimResult:
     Атрибуты:
         t        -- массив времени [n]
         x        -- траектория состояния [n x 16]
-                    Индексы: [x,y,z]=0:3, [vx,vy,vz]=3:6,
-                             [phi,theta,psi]=6:9, [phidot,thetadot,psidot]=9:12
-        zeta     -- параметр ближайшей точки (восстановленный) [n]
+        zeta     -- параметр ближайшей точки [n]
         p_ref    -- опорная траектория (ближайшие точки на кривой) [n x 3]
         errors   -- ошибки регулирования [n x 4]:
                     col 0: s_arc - V*t [м]
@@ -467,6 +454,15 @@ class SimResult:
 
     def print_summary(self) -> None:
         """Вывести сводку финальных ошибок и скорости."""
+        import sys
+        out = sys.stdout
+        # На Windows консоль может использовать cp866/cp1251 — принудительно UTF-8
+        try:
+            if hasattr(out, "reconfigure"):
+                out.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
         e = self.errors[-1]
         v = self.velocity[-1]
         print(f"  Результаты симуляции (t = {self.cfg.T} с):")
@@ -478,57 +474,41 @@ class SimResult:
         print(f"    zeta_final   = {self.zeta[-1]:.4f}")
 
     def plot(self, out_dir: str, prefix: str = "sim") -> None:
-        """Сохранить графики результатов в директорию out_dir.
+        """Сохранить 6 графиков результатов в директорию out_dir.
 
-        Сохраняемые файлы:
-            {prefix}_traj_3d.png   -- 3D траектория
-            {prefix}_traj_xy.png   -- проекция X-Y
-            {prefix}_errors.png    -- ошибки s_arc-V*t, e1, e2
-            {prefix}_yaw_error.png -- ошибка рысканья delta_phi
-            {prefix}_velocity.png  -- скорость vs V*
-            {prefix}_angles.png    -- угловые координаты phi, theta, psi
-
-        Параметры:
-            out_dir -- директория для сохранения (создаётся автоматически)
-            prefix  -- префикс имён файлов (по умолчанию "sim")
+        Файлы: {prefix}_traj_3d.png, _traj_xy.png, _errors.png,
+               _yaw_error.png, _velocity.png, _angles.png
         """
         os.makedirs(out_dir, exist_ok=True)
 
         _plot_3d_traj(
-            p_ref=self.p_ref,
-            p_real=self.x[:, 0:3],
+            p_ref=self.p_ref, p_real=self.x[:, 0:3],
             outpath=os.path.join(out_dir, f"{prefix}_traj_3d.png"),
             title="Согласованное управление: 3D траектория",
         )
         _plot_xy(
-            p_ref=self.p_ref,
-            p_real=self.x[:, 0:3],
+            p_ref=self.p_ref, p_real=self.x[:, 0:3],
             outpath=os.path.join(out_dir, f"{prefix}_traj_xy.png"),
             title="Проекция X-Y",
         )
         _plot_errors(
-            t=self.t,
-            e=self.errors[:, :3],
+            t=self.t, e=self.errors[:, :3],
             labels=["s_arc - V*t, м", "e1, м", "e2, м"],
             outpath=os.path.join(out_dir, f"{prefix}_errors.png"),
             title="Ошибки слежения за траекторией",
         )
         _plot_errors(
-            t=self.t,
-            e=self.errors[:, 3:4],
+            t=self.t, e=self.errors[:, 3:4],
             labels=["delta_phi, рад"],
             outpath=os.path.join(out_dir, f"{prefix}_yaw_error.png"),
             title="Ошибка по углу рысканья",
         )
         _plot_velocity(
-            t=self.t,
-            vel=self.velocity,
-            Vstar=self.cfg.Vstar,
+            t=self.t, vel=self.velocity, Vstar=self.cfg.Vstar,
             outpath=os.path.join(out_dir, f"{prefix}_velocity.png"),
         )
         _plot_angles(
-            t=self.t,
-            angles=self.x[:, 6:9],
+            t=self.t, angles=self.x[:, 6:9],
             outpath=os.path.join(out_dir, f"{prefix}_angles.png"),
         )
 
@@ -551,25 +531,7 @@ def simulate_path_following(
 
     Возвращает:
         SimResult -- результаты: траектории, ошибки, скорость, опорная кривая
-
-    Алгоритм:
-        1. Создать PathFollowingController с параметрами из cfg
-        2. Задать начальное состояние (из cfg.x0 или точка p(zeta0) на кривой)
-        3. Выполнить численное интегрирование RK4 (sim.py)
-        4. Восстановить параметры ближайшей точки zeta (прогон наблюдателя)
-        5. Вычислить ошибки и скорость
-        6. Вернуть SimResult
-
-    Пример:
-        >>> import numpy as np
-        >>> from drone_path_sim import make_curve, SimConfig, simulate_path_following
-        >>> curve = make_curve(lambda s: np.array([3*np.cos(s), 3*np.sin(s), s]))
-        >>> cfg = SimConfig(Vstar=1.0, T=20.0, dt=0.002)
-        >>> result = simulate_path_following(curve, cfg)
-        >>> result.print_summary()
-        >>> result.plot("out_images/my_spiral")
     """
-    # Собрать HighGainParams
     params = HighGainParams(
         kappa=cfg.kappa,
         a=tuple(cfg.a),
@@ -578,23 +540,18 @@ def simulate_path_following(
         ell=cfg.ell,
     )
 
-    # Начальное состояние
     if cfg.x0 is None:
         x0 = np.zeros(16, dtype=float)
-        x0[0:3] = curve.p(cfg.zeta0)  # положение на кривой в точке zeta0
+        x0[0:3] = curve.p(cfg.zeta0)
     else:
         x0 = np.asarray(cfg.x0, dtype=float).copy()
         if len(x0) != 16:
             raise ValueError(
-                f"x0 должен быть 16-мерным вектором состояния, получено {len(x0)}. "
-                f"Структура: [x,y,z, vx,vy,vz, phi,theta,psi, "
-                f"phidot,thetadot,psidot, u1_bar,rho1, u2,rho2]"
+                f"x0 должен быть 16-мерным вектором состояния, получено {len(x0)}."
             )
 
-    # Физические параметры дрона (явные или нормализованная модель)
     model = cfg.quad_model if cfg.quad_model is not None else QuadModel()
 
-    # Создать контроллер
     ctrl = PathFollowingController(
         curve=curve,
         Vstar=cfg.Vstar,
@@ -604,6 +561,7 @@ def simulate_path_following(
         use_numerical_grad=cfg.use_numerical_grad,
         nearest_fn=cfg.nearest_fn,
         quad_model=model,
+        speed_fn=cfg.speed_fn,
     )
 
     def dynamics(x: np.ndarray, U: np.ndarray) -> np.ndarray:
@@ -612,19 +570,14 @@ def simulate_path_following(
     def step(t: float, x: np.ndarray, Uprev, dt: float) -> np.ndarray:
         return ctrl.step(t, x, Uprev, dt)
 
-    # Запуск симуляции
     raw = _simulate_raw(dynamics, step, x0, T=cfg.T, dt=cfg.dt)
     t_arr = raw["t"]
     x_arr = raw["x"]
     n = len(t_arr)
 
-    # Восстановить zeta (прогон наблюдателя ближайшей точки на записанной траектории)
     zeta_arr = _recompute_zeta(x_arr, curve, cfg)
-
-    # Опорная траектория (ближайшие точки на кривой)
     p_ref = np.stack([curve.p(z) for z in zeta_arr], axis=0)
 
-    # Вычислить ошибки регулирования
     errors = np.zeros((n, 4), dtype=float)
     for k in range(n):
         z = zeta_arr[k]
@@ -636,36 +589,20 @@ def simulate_path_following(
         s_arc = z * t_norm
         errors[k] = [s_arc - cfg.Vstar * t_arr[k], e1, e2, d_phi]
 
-    # Скорость дрона
     velocity = np.linalg.norm(x_arr[:, 3:6], axis=1)
 
     return SimResult(
-        t=t_arr,
-        x=x_arr,
-        zeta=zeta_arr,
-        p_ref=p_ref,
-        errors=errors,
-        velocity=velocity,
-        curve=curve,
-        cfg=cfg,
+        t=t_arr, x=x_arr, zeta=zeta_arr, p_ref=p_ref,
+        errors=errors, velocity=velocity, curve=curve, cfg=cfg,
     )
 
-
-# ---------------------------------------------------------------------------
-# Вспомогательная функция: восстановление zeta после симуляции
-# ---------------------------------------------------------------------------
 
 def _recompute_zeta(
     x_arr: np.ndarray,
     curve: CurveGeom,
     cfg: SimConfig,
 ) -> np.ndarray:
-    """Прогнать наблюдатель ближайшей точки на записанной траектории.
-
-    Если cfg.nearest_fn задана — используется точная аналитическая формула.
-    Иначе — NearestPointObserver интегрируется на записанной траектории.
-    Возвращает массив параметров zeta[k] для каждого шага симуляции.
-    """
+    """Прогнать наблюдатель ближайшей точки на записанной траектории."""
     n = len(x_arr)
     zeta_arr = np.zeros(n, dtype=float)
 
@@ -686,15 +623,10 @@ def _recompute_zeta(
 
 
 # ===========================================================================
-# 6. Утилиты визуализации (автономные, без зависимости от plotting.py)
+# 6. Утилиты визуализации (автономные)
 # ===========================================================================
 
-def _plot_3d_traj(
-    p_ref: np.ndarray,
-    p_real: np.ndarray,
-    outpath: str,
-    title: str = "",
-) -> None:
+def _plot_3d_traj(p_ref, p_real, outpath, title=""):
     fig = plt.figure(figsize=(10, 6))
     ax = fig.add_subplot(111, projection="3d")
     if p_ref is not None:
@@ -707,17 +639,10 @@ def _plot_3d_traj(
     ax.legend(); ax.grid(True)
     if title:
         ax.set_title(title)
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
+    fig.tight_layout(); fig.savefig(outpath, dpi=150); plt.close(fig)
 
 
-def _plot_xy(
-    p_ref: np.ndarray,
-    p_real: np.ndarray,
-    outpath: str,
-    title: str = "Проекция X-Y",
-) -> None:
+def _plot_xy(p_ref, p_real, outpath, title="Проекция X-Y"):
     fig, ax = plt.subplots(figsize=(6, 6))
     if p_ref is not None:
         ax.plot(p_ref[:, 0], p_ref[:, 1], "--r", linewidth=1.5, label="Заданная")
@@ -726,110 +651,40 @@ def _plot_xy(
     ax.set_xlabel("x, м"); ax.set_ylabel("y, м")
     ax.grid(True, linestyle="--"); ax.legend()
     ax.set_title(title); ax.set_aspect("equal")
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
+    fig.tight_layout(); fig.savefig(outpath, dpi=150); plt.close(fig)
 
 
-def _plot_errors(
-    t: np.ndarray,
-    e: np.ndarray,
-    labels: list,
-    outpath: str,
-    title: str = "",
-) -> None:
+def _plot_errors(t, e, labels, outpath, title=""):
     fig, ax = plt.subplots(figsize=(10, 4))
     styles = ["--", "-.", "-", ":"]
-    colors = [
-        (0.466, 0.674, 0.188),
-        (0.929, 0.694, 0.125),
-        (0.0078, 0.447, 0.741),
-        "r",
-    ]
+    colors = [(0.466, 0.674, 0.188), (0.929, 0.694, 0.125),
+              (0.0078, 0.447, 0.741), "r"]
     for i, lab in enumerate(labels):
         ax.plot(t, e[:, i], linewidth=2.0, label=lab,
                 linestyle=styles[i % len(styles)],
                 color=colors[i % len(colors)])
-    ax.set_xlabel("t, с"); ax.grid(True, linestyle="--")
-    ax.legend()
+    ax.set_xlabel("t, с"); ax.grid(True, linestyle="--"); ax.legend()
     if title:
         ax.set_title(title)
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
+    fig.tight_layout(); fig.savefig(outpath, dpi=150); plt.close(fig)
 
 
-def _plot_velocity(
-    t: np.ndarray,
-    vel: np.ndarray,
-    Vstar: float,
-    outpath: str,
-) -> None:
+def _plot_velocity(t, vel, Vstar, outpath):
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(t, vel, color=(0.0078, 0.447, 0.741), linewidth=2.0, label="||v||, м/с")
-    ax.axhline(Vstar, color="r", linestyle="--", linewidth=1.5,
-               label=f"V* = {Vstar}")
-    ax.set_xlabel("t, с"); ax.grid(True, linestyle="--")
-    ax.legend()
+    ax.axhline(Vstar, color="r", linestyle="--", linewidth=1.5, label=f"V* = {Vstar}")
+    ax.set_xlabel("t, с"); ax.grid(True, linestyle="--"); ax.legend()
     ax.set_title("Линейная скорость")
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
+    fig.tight_layout(); fig.savefig(outpath, dpi=150); plt.close(fig)
 
 
-def _plot_angles(
-    t: np.ndarray,
-    angles: np.ndarray,
-    outpath: str,
-) -> None:
+def _plot_angles(t, angles, outpath):
     fig, ax = plt.subplots(figsize=(8, 4))
     lbls = ["phi (рысканье)", "theta (тангаж)", "psi (крен)"]
     styles = ["-", "--", "-."]
     for i in range(min(3, angles.shape[1])):
-        ax.plot(t, angles[:, i], linewidth=2.0,
-                label=lbls[i], linestyle=styles[i])
+        ax.plot(t, angles[:, i], linewidth=2.0, label=lbls[i], linestyle=styles[i])
     ax.set_xlabel("t, с"); ax.set_ylabel("рад")
     ax.grid(True, linestyle="--"); ax.legend()
     ax.set_title("Угловые координаты")
-    fig.tight_layout()
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
-
-
-# ===========================================================================
-# 7. Быстрая проверка (python drone_path_sim.py)
-# ===========================================================================
-
-if __name__ == "__main__":
-    import sys
-
-    # Принудительно UTF-8 на Windows
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-    print("=== drone_path_sim: быстрая проверка ===")
-    print("Кривая: спираль r=3 (как в диссертации, Гл. 4)")
-
-    # Воспроизводим тест из run_ch4_spiral.py через новый API
-    curve = make_curve(lambda s: np.array([3.0*np.cos(s), 3.0*np.sin(s), s]))
-
-    # Начальное состояние: x0=(2.9, 0, 0) как в диссертации
-    x0 = np.zeros(16)
-    x0[0:3] = np.array([2.9, 0.0, 0.0])
-
-    cfg = SimConfig(
-        Vstar=1.0,
-        T=20.0,       # укорочено для быстрой проверки
-        dt=0.002,
-        x0=x0,
-        kappa=200.0,
-        gamma=(1.0, 3.0, 5.0, 3.0, 1.0),
-        gamma_nearest=1.0,
-        zeta0=0.0,
-    )
-
-    print(f"  T={cfg.T}с, dt={cfg.dt}, kappa={cfg.kappa}, V*={cfg.Vstar}")
-    result = simulate_path_following(curve, cfg)
-    result.print_summary()
-    result.plot("out_images/drone_path_sim_test", prefix="spiral")
-    print("=== Готово ===")
+    fig.tight_layout(); fig.savefig(outpath, dpi=150); plt.close(fig)

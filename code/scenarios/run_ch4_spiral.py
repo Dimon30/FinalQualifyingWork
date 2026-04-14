@@ -9,17 +9,19 @@
 """
 import os
 import sys
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
-from dynamics import quad_dynamics_16
-from controllers.ch4_path import Ch4PathController
-from controllers.common import HighGainParams
-from geometry import spiral_curve, se_from_pose, spiral_nearest_observer_step
-from sim import simulate
-from plotting import ensure_out, plot_3d_traj, plot_errors, plot_velocity, plot_xy
+from drone_sim.models.dynamics import quad_dynamics_16
+from drone_sim.control.path_following import Ch4PathController
+from drone_sim.control.common import HighGainParams
+from drone_sim.geometry.curves import spiral_curve, se_from_pose, spiral_nearest_observer_step
+from drone_sim.simulation.runner import simulate
+from drone_sim.visualization.plotting import (
+    ensure_out, plot_3d_traj, plot_errors, plot_velocity, plot_xy
+)
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "code/out_images", "ch4_spiral")
+OUT = os.path.join(os.path.dirname(__file__), "..", "out_images", "ch4_spiral")
 L = 5.0
 Vstar = 1.0
 R = 3.0
@@ -30,7 +32,6 @@ def main():
 
     curve = spiral_curve(r=R)
 
-    # Параметры из диссертации стр. 44: κ=200
     params = HighGainParams(
         kappa=200.0,
         a=(5.0, 10.0, 10.0, 5.0, 1.0),
@@ -48,7 +49,6 @@ def main():
         gamma_nearest=1.0,
     )
 
-    # Начальное состояние: x0=(2.9, 0, 0) — близко к кривой (r=3)
     x0 = np.zeros(16)
     x0[0:3] = np.array([2.9, 0.0, 0.0])
 
@@ -64,7 +64,6 @@ def main():
     t = res["t"]
     x = res["x"]
 
-    # Оценка ближайшей точки (воспроизводим наблюдатель зета)
     zeta_arr = np.zeros(len(t))
     zeta = 0.0
     for k in range(len(t)):
@@ -73,7 +72,6 @@ def main():
 
     p_ref = np.stack([curve.p(z) for z in zeta_arr], axis=0)
 
-    # Ошибки s, e1, e2  (s_arc = ζ·√(r²+1) — длина дуги для спирали)
     tangent_norm_spiral = np.sqrt(R**2 + 1.0)
     errors = np.zeros((len(t), 3))
     for k in range(len(t)):
@@ -82,24 +80,20 @@ def main():
         s_arc = s * tangent_norm_spiral
         errors[k] = [s_arc - Vstar * t[k], e1, e2]
 
-    # Угол рысканья ошибка δφ
     phi_arr = x[:, 6]
     phi_star_arr = np.array([curve.yaw_star(z) for z in zeta_arr])
     dphi_arr = np.arctan2(np.sin(phi_arr - phi_star_arr),
                           np.cos(phi_arr - phi_star_arr))
 
-    # Скорость
     vel = np.linalg.norm(x[:, 3:6], axis=1)
 
     plot_3d_traj(
-        p_ref=p_ref,
-        p_real=x[:, 0:3],
+        p_ref=p_ref, p_real=x[:, 0:3],
         outpath=os.path.join(OUT, "ch4_spiral_3d.png"),
         title="Глава 4: согласованное управление (спираль)"
     )
     plot_xy(
-        p_ref=p_ref,
-        p_real=x[:, 0:3],
+        p_ref=p_ref, p_real=x[:, 0:3],
         outpath=os.path.join(OUT, "ch4_spiral_xy.png"),
         title="Проекция X-Y"
     )

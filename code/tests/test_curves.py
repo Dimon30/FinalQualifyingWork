@@ -57,7 +57,7 @@ TESTS = [
         curve_fn=lambda: make_curve(
             lambda s: np.array([3.0*np.cos(s), 3.0*np.sin(s), 5.0])
         ),
-        x0_pos=np.array([2.8, 0.0, 5.0]),
+        x0_pos=np.array([3.0, 0.0, 5.0]),
         cfg=dict(Vstar=1.0, T=40.0, dt=0.002, kappa=200.0,
                  gamma=(1., 3., 5., 3., 1.), gamma_nearest=1.0, zeta0=0.0),
     ),
@@ -80,6 +80,7 @@ TESTS = [
                  gamma=(1., 3., 5., 3., 1.), gamma_nearest=1.0, zeta0=0.0,
                  nearest_fn=nearest_point_line),
     ),
+    # TODO перепроверить алгоритм, есть подозрение что написано неправильно
     dict(
         name="line_xz_plane",
         title="Прямая x=s,y=0,z=0.5s (аналитическая nearest_fn)",

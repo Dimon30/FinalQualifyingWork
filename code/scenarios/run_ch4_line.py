@@ -9,6 +9,8 @@
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 import numpy as np
 from drone_sim.models.dynamics import quad_dynamics_16, sat_tanh
@@ -16,7 +18,7 @@ from drone_sim.control.path_following import Ch4PathController
 from drone_sim.control.common import HighGainParams
 from drone_sim.geometry.curves import line_xyz_curve, se_from_pose, nearest_point_line
 from drone_sim.simulation.runner import simulate
-from drone_sim.visualization.plotting import ensure_out, plot_3d_traj, plot_errors, plot_velocity
+from drone_sim.visualization.plotting import ensure_out, display_path, plot_3d_traj, plot_errors, plot_velocity
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "out_images", "ch4_line")
 L = 5.0
@@ -89,7 +91,7 @@ def main():
 
     print(f"  Финальная скорость: {vel[-1]:.4f} м/с (цель: {Vstar})")
     print(f"  Финальные ошибки: s={errors[-1,0]:.3f}, e1={errors[-1,1]:.4f}, e2={errors[-1,2]:.4f}")
-    print(f"  Результаты сохранены в {OUT}")
+    print(f"  Результаты сохранены в {display_path(OUT)}")
 
 
 if __name__ == "__main__":

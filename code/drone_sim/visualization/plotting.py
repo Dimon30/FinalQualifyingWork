@@ -16,6 +16,20 @@ def ensure_out(outdir: str) -> None:
     os.makedirs(outdir, exist_ok=True)
 
 
+def display_path(p: str) -> str:
+    """Вернуть путь для вывода в консоль относительно текущей рабочей директории.
+
+    При запуске из корня проекта возвращает читаемый относительный путь,
+    например ``code/out_images/ch4_line`` вместо абсолютного пути.
+    """
+    try:
+        rel = os.path.relpath(p)
+        return rel.replace("\\", "/")
+    except ValueError:
+        # На Windows os.path.relpath выбрасывает ValueError если пути на разных дисках.
+        return p.replace("\\", "/")
+
+
 def plot_3d_traj(
     p_ref: np.ndarray,
     p_real: np.ndarray,

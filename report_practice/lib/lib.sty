@@ -1,0 +1,137 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ПЕРЕМЕННЫЕ ДЛЯ РАБОТЫ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newcommand{\labnumber}{1} % номер работы
+\newcommand{\labteacher}{Ким Станислав Александрович}
+\newcommand{\labsubject}{Теории идентификации}  % В дательном падеже
+\newcommand{\labtitle}{}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ЯЗЫК, ШРИФТЫ И ОСНОВНЫЕ НАСТРОЙКИ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{fontspec}          % Подключение системных шрифтов (нужно для XeLaTeX/LuaLaTeX)
+\RequirePackage[russian]{babel}    % Русская локализация (перевод названий, переносы)
+\setmainfont{Cambria}              % Основной шрифт документа
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- РАЗМЕТКА СТРАНИЦЫ И ГЕОМЕТРИЯ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage[a4paper, left=20mm, top=15mm, right=15mm, bottom=15mm,
+                includehead]{geometry} % Размеры полей
+\setlength{\headheight}{7pt}  % высота колонтитула
+\setlength{\headsep}{20pt}    % отступ от текста до шапки
+\setlength{\footskip}{12mm}   % отступ номера страницы от текста
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ЦВЕТА И ГРАФИКА ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{graphicx}           % Вставка изображений
+\DeclareGraphicsExtensions{.pdf, .png, .jpg} % допустимые форматы картинок
+\RequirePackage{color}              % Работа с цветами
+\RequirePackage{xcolor}             % Расширенные цвета
+\RequirePackage{caption}            % Настройка подписей
+\RequirePackage{subcaption}         % Подписи к подрисункам
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- МАТЕМАТИКА ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{amsmath, amssymb, amsfonts, bm} % Расширенная математика и жирные символы
+\setcounter{MaxMatrixCols}{40}       % Увеличение максимального числа столбцов в матрицах
+\RequirePackage{siunitx}             % Красивые единицы измерений и числа
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- БИБЛИОГРАФИЯ И ССЫЛКИ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{csquotes}            % Корректные кавычки (требуется biblatex+babel)
+\RequirePackage{hyperref}            % Кликабельные ссылки
+\RequirePackage{biblatex}            % Поддержка библиографии
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ТАБЛИЦЫ И СПИСКИ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{multirow}            % Объединение ячеек по вертикали
+\RequirePackage{enumitem}            % Гибкая настройка списков
+%\RequirePackage{array}              % Расширенные таблицы (не используется)
+%\RequirePackage{tabularx}           % Автоматическая ширина колонок (не используется)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ВСПОМОГАТЕЛЬНЫЕ ПАКЕТЫ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{calc}                % Арифметика с длинами
+\RequirePackage{wasysym}             % Доп. символы
+\RequirePackage{placeins}            % \FloatBarrier — запрет перепрыгивания float’ов
+\RequirePackage{float}               % Жёсткое позиционирование float’ов
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- РИСОВАНИЕ СХЕМ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{circuitikz}          % Электрические схемы
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc} % Доп. библиотеки TikZ
+%\RequirePackage{tikz}               % Базовый TikZ (не используется)
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ОФОРМЛЕНИЕ ГЛАВ И РАЗДЕЛОВ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{titlesec}            % Кастомизация заголовков
+
+\titleformat{\section}[hang]         % Формат заголовков разделов
+  {\normalfont\Large\bfseries}
+  {\thesection.}{0.8em}{}
+\titlespacing{\section}{0pt}{6pt}{12pt}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ШАПКИ И НИЗ СТРАНИЦЫ ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{fancyhdr}            % Красивые колонтитулы
+\pagestyle{fancy}
+
+% Очистка и статичные элементы шапки
+\fancyhf{}
+\fancyhead[L]{}
+\fancyhead[R]{}
+\fancyfoot[C]{\thepage}
+
+% Толщина линий
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% Убираем метки заголовков в колонтитулах
+\providecommand{\chaptermark}[1]{}
+\renewcommand{\chaptermark}[1]{}
+\renewcommand{\sectionmark}[1]{}
+\renewcommand{\subsectionmark}[1]{}
+
+% Для страниц «plain» (например, первая страница главы)
+\fancypagestyle{plain}{%
+    \fancyfoot[C]{\thepage}
+    \renewcommand{\headrulewidth}{0pt}
+    \renewcommand{\footrulewidth}{0pt}
+}
+
+% Возвращаем стиль после содержания
+\let\oldtableofcontents\tableofcontents
+\renewcommand{\tableofcontents}{%
+    \cleardoublepage
+    \pagestyle{fancy}%
+    \markboth{}{}%
+    \oldtableofcontents
+    \thispagestyle{fancy}%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% --- ЛИСТИНГИ КОДА ---
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\RequirePackage{listings}            % Для вставки исходного кода
+\lstset{
+  basicstyle=\ttfamily\small,        % Шрифт кода
+  numbers=left,                      % Номера строк
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=5pt,
+  frame=single,                      % Рамка
+  rulecolor=\color{black},
+  keywordstyle=\color{blue},         % Подсветка ключевых слов
+  commentstyle=\color{green!50!black}, % Комментарии
+  stringstyle=\color{orange},        % Строки
+  showstringspaces=false
+}

@@ -1,35 +1,9 @@
-"""
-ml/training/train_model.py
-============================
-Обучение SpeedMLP на датасете из CSV.
-
-Пайплайн:
-    1. Загрузить CSV (признаки + V_opt)
-    2. Train / val split (80/20 по умолчанию)
-    3. Обучить SpeedMLP: loss = MSE(V_pred, V_opt)
-    4. Early stopping по val_loss
-    5. Сохранить лучшую модель в .pt
-
-Признаки (входы модели, 7 колонок):
-    e1, e2, de2_dt, v_norm, heading_error, kappa, kappa_max_lookahead
-
-Целевая переменная:
-    V_opt
-
-Колонки s, t_norm в CSV игнорируются при обучении (диагностика).
-
-Публичный API:
-    train(csv_path, model_path, ...) -> TrainResult
-    load_dataset(csv_path)           -> (X, y)
-
-CLI:
-    python -m ml.training.train_model --csv code/ml/data/dataset.csv
-"""
+"""Training entry point for ``SpeedMLP``."""
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -38,12 +12,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
+from drone_sim.models.quad_model import QuadModel
 from ml.models.speed_model import INPUT_SIZE, SpeedMLP, save_speed_model
 
-# ---------------------------------------------------------------------------
-# Логирование
-# ---------------------------------------------------------------------------
-
+# Logging.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -51,58 +23,31 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Имена признаков в CSV (строго в этом порядке)
+# CSV columns used for training.
 _FEATURE_COLS = [
     "e1", "e2", "de2_dt", "v_norm", "heading_error",
     "kappa", "kappa_max_lookahead",
 ]
 _TARGET_COL = "V_opt"
 
-# Пути по умолчанию
-_DEFAULT_CSV   = "code/ml/data/dataset.csv"
-_DEFAULT_MODEL = "code/ml/data/model.pt"
+# Default paths.
+_DEFAULT_CSV = "code/ml/data/dataset.csv"
+_DEFAULT_MODEL = "code/ml/data/saved_models/speed_model.pt"
 
-
-# ---------------------------------------------------------------------------
-# Результат обучения
-# ---------------------------------------------------------------------------
 
 @dataclass
 class TrainResult:
-    """Итоги обучения.
+    """Training summary."""
 
-    Атрибуты:
-        best_val_loss  — лучший val MSE (по которому сохранена модель)
-        train_losses   — список train MSE по эпохам
-        val_losses     — список val MSE по эпохам
-        stopped_epoch  — эпоха, на которой сработал early stopping (или n_epochs)
-        model_path     — путь к сохранённой модели
-    """
     best_val_loss: float
-    train_losses:  list[float]
-    val_losses:    list[float]
+    train_losses: list[float]
+    val_losses: list[float]
     stopped_epoch: int
-    model_path:    str
+    model_path: str
 
-
-# ---------------------------------------------------------------------------
-# Загрузка датасета
-# ---------------------------------------------------------------------------
 
 def load_dataset(csv_path: str) -> tuple[np.ndarray, np.ndarray]:
-    """Загрузить CSV и вернуть (X, y).
-
-    Параметры:
-        csv_path — путь к CSV, сгенерированному build_dataset.py
-
-    Возвращает:
-        X : ndarray shape (N, 7)  — признаки float32
-        y : ndarray shape (N, 1)  — V_opt float32
-
-    Исключения:
-        FileNotFoundError — файл не найден
-        ValueError        — отсутствуют нужные колонки
-    """
+    """Load training arrays ``(X, y)`` from CSV."""
     import csv
 
     path = Path(csv_path)
@@ -133,26 +78,22 @@ def load_dataset(csv_path: str) -> tuple[np.ndarray, np.ndarray]:
     return X, y
 
 
-# ---------------------------------------------------------------------------
-# Early stopping
-# ---------------------------------------------------------------------------
-
 class _EarlyStopping:
-    """Останавливает обучение если val_loss не улучшается patience эпох подряд."""
+    """Track the best validation loss and stop after ``patience`` misses."""
 
     def __init__(self, patience: int, min_delta: float = 1e-6) -> None:
-        self.patience   = patience
-        self.min_delta  = min_delta
-        self.best_loss  = float("inf")
-        self.counter    = 0
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = float("inf")
+        self.counter = 0
         self.best_state: Optional[dict] = None
 
     def step(self, val_loss: float, model: nn.Module) -> bool:
-        """Обновить состояние. Возвращает True если нужно остановиться."""
+        """Update state and return ``True`` when training should stop."""
         if val_loss < self.best_loss - self.min_delta:
-            self.best_loss  = val_loss
-            self.counter    = 0
-            # Сохраняем копию весов лучшей эпохи
+            self.best_loss = val_loss
+            self.counter = 0
+            # Store the weights of the best epoch.
             self.best_state = {k: v.clone() for k, v in model.state_dict().items()}
         else:
             self.counter += 1
@@ -160,48 +101,46 @@ class _EarlyStopping:
         return self.counter >= self.patience
 
     def restore_best(self, model: nn.Module) -> None:
-        """Восстановить веса лучшей эпохи в модель."""
+        """Restore the best stored state."""
         if self.best_state is not None:
             model.load_state_dict(self.best_state)
 
 
-# ---------------------------------------------------------------------------
-# Основная функция обучения
-# ---------------------------------------------------------------------------
-
 def train(
-    csv_path:    str   = _DEFAULT_CSV,
-    model_path:  str   = _DEFAULT_MODEL,
-    max_speed:   float = 3.0,
-    n_epochs:    int   = 200,
-    batch_size:  int   = 64,
-    lr:          float = 1e-3,
-    val_frac:    float = 0.2,
-    patience:    int   = 20,
-    seed:        int   = 42,
-    device:      str   = "cpu",
+    csv_path: str = _DEFAULT_CSV,
+    model_path: str = _DEFAULT_MODEL,
+    max_speed: float = 10.0,
+    n_epochs: int = 200,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    val_frac: float = 0.2,
+    patience: int = 20,
+    seed: int = 42,
+    device: str = "cpu",
+    drone: Optional[QuadModel] = None,
 ) -> TrainResult:
-    """Обучить SpeedMLP и сохранить лучшую модель.
+    """Train ``SpeedMLP`` and save the best checkpoint.
 
     Параметры:
-        csv_path   — путь к CSV с датасетом
-        model_path — куда сохранить .pt файл
-        max_speed  — верхняя граница выхода модели (должна совпадать с drone.max_speed)
-        n_epochs   — максимальное число эпох
-        batch_size — размер мини-батча
-        lr         — learning rate (Adam)
-        val_frac   — доля val-выборки (0.2 = 20%)
-        patience   — число эпох без улучшения val_loss до остановки
-        seed       — seed для воспроизводимости split
-        device     — 'cpu' или 'cuda'
-
-    Возвращает:
-        TrainResult с историей loss и путём к модели
+        drone — QuadModel, параметры которого использовались при сборке датасета.
+                Сохраняются в чекпоинт → SpeedPredictor.load() восстанавливает
+                дрона автоматически. None → используются умолчания QuadModel().
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    # --- 1. Загрузка данных ---
+    # Нормализация drone: если не передан — использовать умолчания
+    if drone is None:
+        drone = QuadModel()
+    log.info(
+        "Drone params: min_speed=%.2f  max_speed=%.2f  "
+        "lateral_e_limit=%.2f  tang_e_limit=%.2f  max_vel_norm=%.2f",
+        drone.min_speed, drone.max_speed,
+        drone.lateral_error_limit, drone.tangential_error_limit,
+        drone.max_velocity_norm,
+    )
+
+    # Dataset.
     log.info("Loading dataset: %s", csv_path)
     X, y = load_dataset(csv_path)
     N = len(X)
@@ -210,21 +149,21 @@ def train(
     if N < 4:
         raise ValueError(f"Dataset too small for train/val split: {N} samples")
 
-    # --- 2. Train / val split ---
+    # Train/validation split.
     dataset = TensorDataset(
         torch.from_numpy(X).float(),
         torch.from_numpy(y).float(),
     )
-    n_val   = max(1, int(N * val_frac))
+    n_val = max(1, int(N * val_frac))
     n_train = N - n_val
     generator = torch.Generator().manual_seed(seed)
     train_ds, val_ds = random_split(dataset, [n_train, n_val], generator=generator)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
     log.info("  Train: %d  Val: %d", n_train, n_val)
 
-    # --- 3. Модель, оптимизатор, loss ---
+    # Model, optimizer, loss.
     dev = torch.device(device)
     model = SpeedMLP(max_speed=max_speed, input_size=INPUT_SIZE).to(dev)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -232,18 +171,18 @@ def train(
     early_stop = _EarlyStopping(patience=patience)
 
     log.info("Model: %s", model)
-    log.info("Training: epochs=%d  batch=%d  lr=%.0e  patience=%d  device=%s",
-             n_epochs, batch_size, lr, patience, device)
+    log.info(
+        "Training: epochs=%d  batch=%d  lr=%.0e  patience=%d  device=%s",
+        n_epochs, batch_size, lr, patience, device,
+    )
 
     train_losses: list[float] = []
-    val_losses:   list[float] = []
+    val_losses: list[float] = []
     stopped_epoch = n_epochs
     t0 = time.monotonic()
 
-    # --- 4. Цикл обучения ---
+    # Training loop.
     for epoch in range(1, n_epochs + 1):
-
-        # -- Train --
         model.train()
         train_loss_sum = 0.0
         for xb, yb in train_loader:
@@ -256,7 +195,6 @@ def train(
             train_loss_sum += loss.item() * len(xb)
         train_loss = train_loss_sum / n_train
 
-        # -- Val --
         model.eval()
         val_loss_sum = 0.0
         with torch.no_grad():
@@ -269,7 +207,6 @@ def train(
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
-        # Логируем каждые 10 эпох и последнюю
         if epoch % 10 == 0 or epoch == 1 or epoch == n_epochs:
             elapsed = time.monotonic() - t0
             log.info(
@@ -277,7 +214,6 @@ def train(
                 epoch, n_epochs, train_loss, val_loss, elapsed,
             )
 
-        # -- Early stopping --
         if early_stop.step(val_loss, model):
             stopped_epoch = epoch
             log.info(
@@ -286,9 +222,9 @@ def train(
             )
             break
 
-    # --- 5. Восстановить лучшие веса и сохранить ---
+    # Save best checkpoint (with drone_params for reproducible inference).
     early_stop.restore_best(model)
-    save_speed_model(model, model_path)
+    save_speed_model(model, model_path, drone=drone)
 
     elapsed_total = time.monotonic() - t0
     log.info("-" * 60)
@@ -305,25 +241,20 @@ def train(
         model_path=model_path,
     )
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Train SpeedMLP on V* dataset")
-    parser.add_argument("--csv",      default=_DEFAULT_CSV,   help="Path to dataset CSV")
-    parser.add_argument("--out",      default=_DEFAULT_MODEL, help="Output .pt path")
-    parser.add_argument("--epochs",   type=int,   default=200)
-    parser.add_argument("--batch",    type=int,   default=64)
-    parser.add_argument("--lr",       type=float, default=1e-3)
-    parser.add_argument("--patience", type=int,   default=20)
+    parser.add_argument("--csv", default=_DEFAULT_CSV, help="Path to dataset CSV")
+    parser.add_argument("--out", default=_DEFAULT_MODEL, help="Output .pt path")
+    parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--batch", type=int, default=64)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--val-frac", type=float, default=0.2)
-    parser.add_argument("--max-speed",type=float, default=3.0)
-    parser.add_argument("--device",   default="cpu", choices=["cpu", "cuda"])
-    parser.add_argument("--seed",     type=int,   default=42)
+    parser.add_argument("--max-speed", type=float, default=10.0)
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     train(

@@ -1,0 +1,25 @@
+\babel@toc {russian}{}\relax 
+\contentsline {section}{\numberline {1}Введение}{3}{section.1}%
+\contentsline {section}{\numberline {2}Описание математической модели объекта управления}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Геометрия опорной траектории}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Выходы системы и регулируемые ошибки}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Ограничения модели}{6}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Разработка контроллера траекторного слежения по выходу}{7}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Структура закона управления}{7}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Наблюдатель производных}{7}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Параметры настройки и физический смысл}{8}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Критерии качества управления}{8}{subsection.3.4}%
+\contentsline {section}{\numberline {4}Тестирование корректной работы контроллера}{8}{section.4}%
+\contentsline {section}{\numberline {5}Сбор датасета ограниченного семейства кривых}{10}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Семейство допустимых кривых}{10}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Формирование обучающего примера}{10}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Оракул выбора целевой скорости}{11}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Структура датасета}{11}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Предварительная обработка и разбиение}{11}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Разработка архитектуры полносвязной нейронной сети}{12}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Постановка задачи аппроксимации}{12}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Архитектура сети}{12}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Функция потерь и обучение}{12}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Интеграция сети в систему управления}{13}{subsection.6.4}%
+\contentsline {section}{\numberline {7}Визуализация результатов и выводы}{13}{section.7}%
+\contentsline {section}{\numberline {8}Заключение}{14}{section.8}%

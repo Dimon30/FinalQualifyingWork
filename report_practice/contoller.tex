@@ -1,0 +1,196 @@
+%! Author = Admin
+%! Date = 17.04.2026
+\section{Разработка контроллера траекторного слежения по выходу}
+
+В основе проекта лежит регулятор согласованного управления по выходу из главы~4 диссертации. Его задача состоит в том, чтобы обеспечить движение квадрокоптера вдоль заданной пространственной кривой с минимальными ошибками $e_1$, $e_2$, $\delta_{\phi}$ и с требуемой скоростью изменения параметра кривой $V^{\ast}$.
+
+\subsection{Структура закона управления}
+
+Для перехода от геометрических ошибок к реальным управляющим воздействиям используются матрицы $W(\alpha,\beta,\varepsilon)$ и $b(\phi,\theta,\psi,u_1)$, реализованные в модуле \texttt{path\_following.py}. Матрица кинематического преобразования имеет вид
+\begin{equation}
+    W(\alpha,\beta,\varepsilon) =
+    \begin{bmatrix}
+        \cos\alpha \cos\beta & \sin\alpha \cos\beta & \sin\beta & 0 \\
+        -\sin\alpha & \cos\alpha & 0 & 0 \\
+        -\cos\alpha \sin\beta & -\sin\alpha \sin\beta & \cos\beta & 0 \\
+        -\varepsilon \cos\alpha \cos\beta & -\varepsilon \sin\alpha \cos\beta & -\varepsilon \sin\beta & 1
+    \end{bmatrix}.
+\end{equation}
+
+Матрица входов объекта имеет вид
+\begin{equation}
+    b(\phi,\theta,\psi,u_1) = R_z(\phi)\,B_{\mathrm{inner}}(\theta,\psi,u_1 + g),
+\end{equation}
+где матрица $B_{\mathrm{inner}}$ формируется так, чтобы связать виртуальные входы $[v_1,v_2,u_3,u_4]^{\top}$ с четвертой производной вектора регулируемых переменных.
+
+Закон управления строится в два этапа. Сначала вычисляется ограниченный виртуальный сигнал
+\begin{equation}
+    \bar{U} = \mathrm{sat}_L \left(
+        b^{-1} W^{-1}
+        \left(
+            -\sigma - \gamma_1 \hat{\lambda}_1 - \gamma_2 \hat{\lambda}_2 - \gamma_3 \hat{\lambda}_3 - \gamma_4 \hat{\lambda}_4
+        \right)
+    \right),
+\end{equation}
+после чего вводится динамическое расширение
+\begin{equation}
+    \dot{\eta} = \bar{U}, \qquad U = \gamma_5 \eta + \bar{U}.
+\end{equation}
+Здесь $\hat{\lambda}_i$ --- оценки производных регулируемого выхода, $\sigma$ --- дополнительная переменная расширенного наблюдателя, а $\gamma_1,\dots,\gamma_5$ --- настраиваемые коэффициенты обратной связи.
+
+\subsection{Наблюдатель производных}
+
+Так как в задаче доступны не все производные регулируемых переменных, используется расширенный наблюдатель высокого усиления четвертого порядка:
+\begin{equation}
+    \dot{\hat{\lambda}}_1 = \hat{\lambda}_2 + \kappa a_1 (\lambda_1 - \hat{\lambda}_1),
+\end{equation}
+\begin{equation}
+    \dot{\hat{\lambda}}_2 = \hat{\lambda}_3 + \kappa^2 a_2 (\lambda_1 - \hat{\lambda}_1),
+\end{equation}
+\begin{equation}
+    \dot{\hat{\lambda}}_3 = \hat{\lambda}_4 + \kappa^3 a_3 (\lambda_1 - \hat{\lambda}_1),
+\end{equation}
+\begin{equation}
+    \dot{\hat{\lambda}}_4 = \sigma + W b \bar{U} + \kappa^4 a_4 (\lambda_1 - \hat{\lambda}_1),
+\end{equation}
+\begin{equation}
+    \dot{\sigma} = \kappa^5 a_5 (\lambda_1 - \hat{\lambda}_1).
+\end{equation}
+
+В численных экспериментах используются коэффициенты, согласованные с диссертацией и кодом:
+\begin{equation}
+    a = (5,\,10,\,10,\,5,\,1), \qquad
+    \gamma = (1,\,3,\,5,\,3,\,1).
+\end{equation}
+Для спиральных траекторий применяется $\kappa = 200$ при шаге интегрирования $\Delta t = 0.002$, а для прямых траекторий --- $\kappa = 100$ при $\Delta t = 0.005$.
+
+\subsection{Параметры настройки и физический смысл}
+
+Физический смысл коэффициентов закона управления следующий:
+\begin{enumerate}
+    \item $\gamma_1,\dots,\gamma_4$ задают интенсивность подавления ошибок положения, ориентации и их производных;
+    \item $\gamma_5$ формирует интегральную составляющую по виртуальному входу;
+    \item $\kappa$ определяет скорость работы наблюдателя производных;
+    \item $L$ ограничивает амплитуду виртуальных сигналов через гладкое насыщение;
+    \item $\gamma_{\zeta}$ настраивает скорость сходимости наблюдателя ближайшей точки.
+\end{enumerate}
+
+В проекте также учитываются физические ограничения модели дрона:
+\begin{equation}
+    V_{\min} \le V^{\ast} \le V_{\max},
+\end{equation}
+\begin{equation}
+    \|v(t)\| \le v_{\max},
+\end{equation}
+\begin{equation}
+    |e_2(t)| \le e_{2,\max},
+\end{equation}
+где по умолчанию используются значения $V_{\min}=0.3$, $V_{\max}=10.0$, $v_{\max}=10.0$ и $e_{2,\max}=0.5$.
+
+\subsection{Критерии качества управления}
+
+Качество работы регулятора оценивается по следующим показателям:
+\begin{enumerate}
+    \item точность выхода на траекторию по ошибкам $e_1$ и $e_2$;
+    \item ошибка по углу рыскания $\delta_{\phi}$;
+    \item согласование длины пройденной дуги с эталоном $s_{\mathrm{arc}} - V^{\ast} t$;
+    \item ограниченность линейной скорости $\|v\|$;
+    \item отсутствие численной неустойчивости, NaN и ухода состояний.
+\end{enumerate}
+
+Именно эти величины сохраняются в объекте \texttt{SimResult} и далее используются при тестировании и сравнении методов.
+
+\section{Тестирование корректной работы контроллера}
+
+Автоматизированная проверка корректности выполнена в \texttt{code/tests/test\_curves.py}. Каждый тест запускает полное моделирование движения квадрокоптера по одной из типовых кривых и проверяет финальную норму боковой ошибки
+\begin{equation}
+    \left\|
+        \begin{bmatrix}
+            e_1(T) \\
+            e_2(T)
+        \end{bmatrix}
+    \right\| < \varepsilon_{\mathrm{pass}},
+    \qquad
+    \varepsilon_{\mathrm{pass}} = 1.5 \ \text{м}.
+\end{equation}
+
+Набор тестовых траекторий включает:
+\begin{enumerate}
+    \item круговую спираль с радиусом $r=3$;
+    \item горизонтальную окружность радиуса $r=3$;
+    \item спираль с радиусом $r=2$;
+    \item пространственную прямую $x=s,\ y=s,\ z=s$;
+    \item прямую в плоскости $XZ$: $x=s,\ y=0,\ z=0.5s$;
+    \item плотную спираль с радиусом $r=1.5$.
+\end{enumerate}
+
+Для прямых используется аналитическая функция ближайшей точки, а для спиралей --- динамический наблюдатель. Такой подход позволяет проверить корректность регулятора при разных значениях кривизны, различной норме касательного вектора и разных начальных условиях.
+
+В ходе тестирования анализируются:
+\begin{enumerate}
+    \item финальные ошибки $e_1(T)$ и $e_2(T)$;
+    \item норма скорости $\|v(T)\|$;
+    \item устойчивость наблюдателя ближайшей точки;
+    \item корректность выбора шага $\Delta t$ при заданном $\kappa$.
+\end{enumerate}
+
+Кроме логической проверки \texttt{PASS/FAIL}, для каждого сценария автоматически сохраняются графики траектории, ошибок, скорости и углов. Это упрощает локализацию режимов, в которых требуется перенастройка коэффициентов.
+
+На рисунках~\ref{fig:line_3d}--\ref{fig:circle_errors} приведены результаты трёх типовых сценариев: движение по пространственной прямой, спирали и горизонтальной окружности.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_line_3d}
+        \caption{Траектория, прямая}
+        \label{fig:line_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_line_errors}
+        \caption{Ошибки слежения, прямая}
+        \label{fig:line_errors}
+    \end{subfigure}
+    \caption{Результаты моделирования: пространственная прямая ($V^{\ast}=1.0$, $T=30$ с)}
+    \label{fig:line_results}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_spiral_3d}
+        \caption{Траектория, спираль $r{=}3$}
+        \label{fig:spiral_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_spiral_errors}
+        \caption{Ошибки слежения, спираль $r{=}3$}
+        \label{fig:spiral_errors}
+    \end{subfigure}
+    \caption{Результаты моделирования: спираль $r{=}3$ ($V^{\ast}=1.0$, $T=30$ с)}
+    \label{fig:spiral_results}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/circle_r3_z5_traj_3d}
+        \caption{Траектория, окружность $r{=}3$, $z{=}5$}
+        \label{fig:circle_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/circle_r3_z5_errors}
+        \caption{Ошибки слежения, окружность}
+        \label{fig:circle_errors}
+    \end{subfigure}
+    \caption{Результаты моделирования: горизонтальная окружность $r{=}3$, $z{=}5$ ($V^{\ast}=1.0$, $T=30$ с)}
+    \label{fig:circle_results}
+\end{figure}

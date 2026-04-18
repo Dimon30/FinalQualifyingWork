@@ -1,30 +1,7 @@
-"""
-ml/inference/predict.py
-=========================
-Инференс SpeedMLP в контуре управления.
-
-Публичный API:
-    SpeedPredictor               — класс-предиктор с clip(V_pred, min_speed, max_speed)
-    SpeedPredictor.save(path)    — сохранить модель с весами в файл
-    SpeedPredictor.load(path)    — загрузить предиктор из файла
-    SpeedPredictor.predict(features) -> float
-
-Гарантии:
-    - выход всегда в [drone.min_speed, drone.max_speed]
-    - работает без GPU (принудительный CPU)
-    - потокобезопасен для read-only инференса (одновременный predict)
-
-Пример использования:
-
-    from ml.inference.predict import SpeedPredictor
-    from ml.dataset.features import feature_vector
-
-    predictor = SpeedPredictor.load("code/ml/data/model.pt")
-    feat = feature_vector(state, curve, drone=drone, s=s)
-    V = predictor.predict(feat)
-"""
+"""Inference wrapper for ``SpeedMLP``."""
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Union
 
@@ -32,29 +9,19 @@ import numpy as np
 import torch
 
 from drone_sim.models.quad_model import QuadModel
-from ml.models.speed_model import INPUT_SIZE, SpeedMLP, load_speed_model, save_speed_model
+from ml.models.speed_model import (
+    INPUT_SIZE, SpeedMLP,
+    load_speed_model, load_drone_params_from_checkpoint, save_speed_model,
+)
 
-# Папка по умолчанию для сохранения моделей
-_DEFAULT_MODELS_DIR = "code/ml/data/model"
+# Default model location (relative to project root).
+_DEFAULT_MODELS_DIR = "code/ml/data/saved_models"
 _DEFAULT_MODEL_NAME = "speed_model.pt"
+DEFAULT_MODEL_PATH: str = "code/ml/data/saved_models/speed_model.pt"
 
 
 class SpeedPredictor:
-    """Предиктор оптимальной скорости V* на основе обученного SpeedMLP.
-
-    Оборачивает SpeedMLP и добавляет:
-        - принудительный CPU (работает без GPU)
-        - clip выхода в [drone.min_speed, drone.max_speed]
-        - удобный API save / load
-
-    Параметры:
-        model      — обученный SpeedMLP
-        drone      — QuadModel с ограничениями скорости; None → умолчания QuadModel()
-
-    Пример:
-        predictor = SpeedPredictor.load("code/ml/data/model/speed_model.pt")
-        V = predictor.predict(feature_vector(state, curve, s=s))
-    """
+    """Inference wrapper with CPU execution and output clipping."""
 
     def __init__(
         self,
@@ -64,50 +31,44 @@ class SpeedPredictor:
         self._model = model.cpu().eval()
         self._drone = drone if drone is not None else QuadModel()
 
-    # ------------------------------------------------------------------
-    # Инференс
-    # ------------------------------------------------------------------
-
     def predict(
         self,
         features: Union[np.ndarray, torch.Tensor, list],
     ) -> float:
-        """Предсказать оптимальную скорость V* и обрезать по ограничениям дрона.
-
-        Параметры:
-            features — вектор признаков длиной INPUT_SIZE (7):
-                       [e1, e2, de2_dt, v_norm, heading_error, kappa, kappa_max_lookahead]
-                       Принимает ndarray, Tensor или list.
-
-        Возвращает:
-            float — V* ∈ [drone.min_speed, drone.max_speed]
-        """
-        x = self._to_tensor(features)          # shape (1, 7)
+        """Predict the target speed and clip it to drone limits."""
+        x = self._to_tensor(features)  # shape (1, INPUT_SIZE)
         with torch.no_grad():
-            raw = self._model(x).item()        # сырое sigmoid * max_speed
+            raw = self._model(x).item()
 
-        # Clip в допустимый диапазон из параметров дрона (не константы)
         return float(np.clip(raw, self._drone.min_speed, self._drone.max_speed))
 
-    # ------------------------------------------------------------------
-    # Сохранение / загрузка
-    # ------------------------------------------------------------------
-
     def save(self, path: str | None = None) -> str:
-        """Сохранить модель с весами в файл.
+        """Сохранить модель вместе с параметрами дрона.
 
-        Параметры:
-            path — путь к .pt файлу; если None — сохраняет в папку по умолчанию
-                   (_DEFAULT_MODELS_DIR / _DEFAULT_MODEL_NAME)
-
-        Возвращает:
-            str — реальный путь к сохранённому файлу
+        Параметры дрона берутся из self._drone — того, с которым создан предиктор.
+        При последующем load() QuadModel восстановится автоматически.
         """
         if path is None:
             path = str(Path(_DEFAULT_MODELS_DIR) / _DEFAULT_MODEL_NAME)
 
-        save_speed_model(self._model, path)
+        save_speed_model(self._model, path, drone=self._drone)
         return path
+
+    @classmethod
+    def default(cls) -> "SpeedPredictor":
+        """Загрузить модель из стандартного пути проекта (``code/ml/data/saved_models/speed_model.pt``).
+
+        Параметры дрона восстанавливаются из чекпоинта автоматически.
+        Если файл не найден — бросает ``FileNotFoundError``.
+        """
+        if not Path(DEFAULT_MODEL_PATH).exists():
+            raise FileNotFoundError(
+                f"Модель по умолчанию не найдена: {DEFAULT_MODEL_PATH}\n"
+                "Сначала запустите:\n"
+                "  python code/scenarios/run_build_dataset.py --curves 10 --samples 20\n"
+                "  python code/scenarios/train_speed_model.py"
+            )
+        return cls.load(DEFAULT_MODEL_PATH)
 
     @classmethod
     def load(
@@ -115,24 +76,38 @@ class SpeedPredictor:
         path: str,
         drone: QuadModel | None = None,
     ) -> "SpeedPredictor":
-        """Загрузить предиктор из .pt файла.
+        """Загрузить предиктор из файла.
+
+        Параметры дрона восстанавливаются из чекпоинта автоматически.
+        Аргумент `drone` — опциональный override: если передан, его параметры
+        используются вместо сохранённых, но при расхождении будет предупреждение.
 
         Параметры:
-            path  — путь к файлу, сохранённому через save() или save_speed_model()
-            drone — QuadModel для clip ограничений; None → QuadModel()
-
-        Возвращает:
-            SpeedPredictor — готовый к инференсу предиктор (CPU, eval)
+            path  — путь к .pt файлу
+            drone — override QuadModel; None → использовать из чекпоинта
         """
         model = load_speed_model(path, device="cpu")
+
+        # Читаем drone_params из чекпоинта (backward-compat: предупреждение если нет)
+        saved_params = load_drone_params_from_checkpoint(path)
+
+        if drone is None:
+            # Восстанавливаем QuadModel из чекпоинта — основной путь
+            drone = QuadModel(
+                min_speed=saved_params["min_speed"],
+                max_speed=saved_params["max_speed"],
+                lateral_error_limit=saved_params["lateral_error_limit"],
+                tangential_error_limit=saved_params["tangential_error_limit"],
+                max_velocity_norm=saved_params["max_velocity_norm"],
+            )
+        else:
+            # drone передан явно — проверить на расхождение с сохранёнными
+            _warn_drone_mismatch(drone, saved_params, path)
+
         return cls(model=model, drone=drone)
 
-    # ------------------------------------------------------------------
-    # Вспомогательные методы
-    # ------------------------------------------------------------------
-
     def _to_tensor(self, features: Union[np.ndarray, torch.Tensor, list]) -> torch.Tensor:
-        """Конвертировать входные признаки в shape (1, INPUT_SIZE) float32 CPU Tensor."""
+        """Convert input features to a CPU tensor of shape ``(1, INPUT_SIZE)``."""
         if isinstance(features, torch.Tensor):
             x = features.float().cpu()
         elif isinstance(features, np.ndarray):
@@ -149,9 +124,47 @@ class SpeedPredictor:
             )
         return x
 
+    @property
+    def drone(self) -> QuadModel:
+        """QuadModel, используемый предиктором (восстановлен из чекпоинта или передан явно)."""
+        return self._drone
+
     def __repr__(self) -> str:
         return (
             f"SpeedPredictor("
             f"model={self._model}, "
-            f"clip=[{self._drone.min_speed}, {self._drone.max_speed}])"
+            f"clip=[{self._drone.min_speed}, {self._drone.max_speed}], "
+            f"lateral_e_lim={self._drone.lateral_error_limit})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательные функции
+# ---------------------------------------------------------------------------
+
+def _warn_drone_mismatch(drone: QuadModel, saved_params: dict, path: str) -> None:
+    """Предупредить если явно переданный drone расходится с сохранёнными параметрами."""
+    mismatches = []
+    checks = [
+        ("min_speed",               drone.min_speed),
+        ("max_speed",               drone.max_speed),
+        ("lateral_error_limit",     drone.lateral_error_limit),
+        ("tangential_error_limit",  drone.tangential_error_limit),
+        ("max_velocity_norm",       drone.max_velocity_norm),
+    ]
+    for key, actual in checks:
+        expected = saved_params.get(key)
+        if expected is not None and abs(actual - expected) > 1e-9:
+            mismatches.append(f"  {key}: чекпоинт={expected}, drone={actual}")
+
+    if mismatches:
+        lines = "\n".join(mismatches)
+        warnings.warn(
+            f"SpeedPredictor.load('{path}'): параметры дрона расходятся с чекпоинтом.\n"
+            f"{lines}\n"
+            "Нормировка признаков (feature_vector) должна использовать те же значения, "
+            "что и при сборке датасета. Убедитесь, что drone совпадает с тем, "
+            "который передавался в generate_dataset() и train().",
+            UserWarning,
+            stacklevel=3,
         )

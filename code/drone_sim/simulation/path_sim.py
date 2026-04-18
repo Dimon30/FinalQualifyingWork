@@ -56,6 +56,7 @@ from drone_sim.models.quad_model import QuadModel
 from drone_sim.control.common import HighGainParams, DerivativeObserver4
 from drone_sim.control.path_following import W_mat, W_inv, b_mat, _safe_inv4
 from drone_sim.geometry.curves import CurveGeom, se_from_pose
+from drone_sim.visualization.plotting import display_path
 from drone_sim.simulation.runner import simulate as _simulate_raw
 
 __all__ = [
@@ -266,19 +267,24 @@ class PathFollowingController:
         self._eta = np.zeros(4, dtype=float)
         self.obs = DerivativeObserver4(dim=4, p=params)
 
+        # Накопленная длина дуги: s_arc = ∫₀^ζ ||t(τ)|| dτ
+        # Корректна для любой параметризации (в т.ч. неравномерной эллипс, парабола…).
+        # Вычисляется инкрементально методом средней точки O(dζ²) за шаг.
+        self._s_arc: float = 0.0
+        self._prev_zeta: float = float(zeta0)
+
     def _lambda_tilde_1(
         self, t: float, p_xyz: np.ndarray, phi: float, s: float
     ) -> np.ndarray:
         """Вектор регулируемых переменных lambda_tilde_1.
 
         lambda_tilde_1 = col(s_arc - V*t, e1, e2, delta_phi)
+        s_arc берётся из self._s_arc — накопленного интеграла ∫||t(τ)||dτ.
         """
         _, e1, e2 = se_from_pose(p_xyz, s, self.curve)
         phi_star = float(self.curve.yaw_star(s))
         d_phi = float(np.arctan2(np.sin(phi - phi_star), np.cos(phi - phi_star)))
-        tangent_norm = float(np.linalg.norm(self.curve.t(s)))
-        s_arc = s * tangent_norm
-        return np.array([s_arc - self.Vstar * float(t), e1, e2, d_phi], dtype=float)
+        return np.array([self._s_arc - self.Vstar * float(t), e1, e2, d_phi], dtype=float)
 
     def step(
         self,
@@ -307,16 +313,33 @@ class PathFollowingController:
         if self._speed_fn is not None:
             try:
                 V_nn = float(self._speed_fn(x, s))
-                # Ограничение ускорения: изменение V_ref не более max_accel * dt за шаг
+                # Защита от NaN/Inf на выходе модели.
+                if not np.isfinite(V_nn):
+                    V_nn = self._prev_V
+                # Защита от eta-windup: если боковая ошибка |e2| превышает 50% от
+                # предела стабильности — запрещаем увеличение V*, только снижение.
+                # Это предотвращает накопление η при несходящемся регуляторе.
+                _, _, e2_curr = se_from_pose(p_xyz, s, self.curve)
+                if abs(e2_curr) > self._model.lateral_error_limit * 0.5:
+                    V_nn = min(V_nn, self._prev_V)
+                # Ограничение ускорения: изменение V_ref не более max_accel * dt за шаг.
                 max_dv = self._model.max_accel * dt
                 V_ref = self._prev_V + float(np.clip(V_nn - self._prev_V, -max_dv, max_dv))
-                # Safety: никогда не превышать max_speed
-                V_ref = min(V_ref, self._model.max_speed)
+                # Клип в допустимый диапазон [min_speed, max_speed].
+                V_ref = float(np.clip(V_ref, self._model.min_speed, self._model.max_speed))
                 self.Vstar = V_ref
                 self._prev_V = V_ref
             except Exception:
                 # При любой ошибке модели — сохраняем предыдущую скорость (fallback)
                 pass
+
+        # Обновление накопленной длины дуги: s_arc = ∫₀^ζ ||t(τ)|| dτ
+        # Метод средней точки (O(dζ²)): корректен для любой параметризации кривой.
+        dz = s - self._prev_zeta
+        if abs(dz) > 1e-12:
+            mid_z = (self._prev_zeta + s) / 2.0
+            self._s_arc += abs(dz) * float(np.linalg.norm(self.curve.t(mid_z)))
+        self._prev_zeta = s
 
         # Шаг 2: геометрия в точке s
         alpha = float(self.curve.yaw_star(s))
@@ -360,6 +383,8 @@ class PathFollowingController:
         self._nearest.reset(zeta0)
         self._eta[:] = 0.0
         self.obs.reset()
+        self._s_arc = 0.0
+        self._prev_zeta = zeta0
 
     @property
     def zeta(self) -> float:
@@ -512,7 +537,7 @@ class SimResult:
             outpath=os.path.join(out_dir, f"{prefix}_angles.png"),
         )
 
-        print(f"  Графики сохранены в {out_dir}/")
+        print(f"  Графики сохранены в {display_path(out_dir)}")
 
 
 # ===========================================================================
@@ -564,6 +589,35 @@ def simulate_path_following(
         speed_fn=cfg.speed_fn,
     )
 
+    # Тёплый старт наблюдателя производных (предотвращает взрыв sigma при perturbation).
+    #
+    # Проблема: при ненулевых начальных возмущениях x0, e = lam1_0 - x1_obs ≠ 0.
+    # Явный Эйлер:  x2_new += dt × k²·a2·e  →  10^4·10·0.01 × e = 1000·e (в 10× больше реального dlam1/dt).
+    # sigma_new += dt × k^5·a5·e → 10^8 × e (гигантское значение, управление насыщается).
+    #
+    # Решение: инициализировать x1_obs = lam1_0 и x2_obs = dlam1/dt|₀ ≈ Frenet-проекция скорости.
+    # Тогда e = 0 на первом шаге и observer корректно отслеживает далее.
+    # Для x0=0 (обычные сценарии): lam1_0 ≈ 0, vel ≈ 0 → obs ≈ 0 (обратная совместимость).
+    from drone_sim.geometry.curves import Rz as _Rz, Ry as _Ry
+    _zeta0 = float(cfg.zeta0)
+    lam1_0 = ctrl._lambda_tilde_1(0.0, x0[0:3], float(x0[6]), _zeta0)
+    ctrl.obs.x1 = lam1_0.copy()
+    # x2_obs ≈ dlam1/dt: Frenet-проекция начальной скорости
+    # Компоненты e1, e2 изменяются со скоростью проекции vel_0 на оси Frenet-frame.
+    # Компонента s_arc: ds_arc/dt ≈ 0 (zeta не движется при t=0), V*t растёт → d(lam1[0])/dt ≈ -V*
+    # Компонента d_phi: phi_dot = x0[9], yaw_star не меняется мгновенно → d(lam1[3])/dt ≈ phi_dot
+    _alpha0 = float(curve.yaw_star(_zeta0))
+    _beta0 = float(curve.beta(_zeta0))
+    _vel0 = x0[3:6]
+    _q_vel = _Ry(_beta0).T @ (_Rz(_alpha0).T @ _vel0)
+    lam2_0 = np.array([
+        -float(cfg.Vstar),   # d(s_arc - V*t)/dt ≈ -V* (drone at rest initially)
+        float(_q_vel[1]),    # de1/dt ≈ vel component along e1 direction
+        float(_q_vel[2]),    # de2/dt ≈ vel component along e2 direction
+        float(x0[9]),        # d(d_phi)/dt ≈ phi_dot
+    ], dtype=float)
+    ctrl.obs.x2 = lam2_0.copy()
+
     def dynamics(x: np.ndarray, U: np.ndarray) -> np.ndarray:
         return quad_dynamics_16(x, U, L=cfg.L, model=model)
 
@@ -578,6 +632,17 @@ def simulate_path_following(
     zeta_arr = _recompute_zeta(x_arr, curve, cfg)
     p_ref = np.stack([curve.p(z) for z in zeta_arr], axis=0)
 
+    # Длина дуги как интеграл ∫₀^ζ ||t(τ)|| dτ (метод средней точки).
+    # Корректна для любой параметризации; для ||t||=const совпадает с ζ·||t||.
+    s_arc_arr = np.zeros(n, dtype=float)
+    for k in range(1, n):
+        dz = zeta_arr[k] - zeta_arr[k - 1]
+        if abs(dz) > 1e-12:
+            mid_z = (zeta_arr[k - 1] + zeta_arr[k]) / 2.0
+            s_arc_arr[k] = s_arc_arr[k - 1] + abs(dz) * float(np.linalg.norm(curve.t(mid_z)))
+        else:
+            s_arc_arr[k] = s_arc_arr[k - 1]
+
     errors = np.zeros((n, 4), dtype=float)
     for k in range(n):
         z = zeta_arr[k]
@@ -585,9 +650,7 @@ def simulate_path_following(
         phi = float(x_arr[k, 6])
         phi_star = float(curve.yaw_star(z))
         d_phi = float(np.arctan2(np.sin(phi - phi_star), np.cos(phi - phi_star)))
-        t_norm = float(np.linalg.norm(curve.t(z)))
-        s_arc = z * t_norm
-        errors[k] = [s_arc - cfg.Vstar * t_arr[k], e1, e2, d_phi]
+        errors[k] = [s_arc_arr[k] - cfg.Vstar * t_arr[k], e1, e2, d_phi]
 
     velocity = np.linalg.norm(x_arr[:, 3:6], axis=1)
 

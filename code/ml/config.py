@@ -1,93 +1,94 @@
-"""
-ml/config.py
-============
-Конфигурация ML-пайплайна для предсказания оптимальной скорости V*.
-
-Физические ограничения квадрокоптера:
-    MAX_SPEED — максимальная параметрическая скорость V* (рад/с или безразм.)
-    Реальная дуговая скорость = V* * ||t(s)||.
-    Для спирали r=3: ||t|| = sqrt(10) ≈ 3.16 → V*=MAX_SPEED=3 → ~9.5 м/с.
-    Для нормированного круга: ||t||=1 → V* = дуговая скорость напрямую.
-
-Ограничения симуляции:
-    Контроллер Гл. 4 работает только при ||t(s)|| = const.
-    Допустимые кривые: прямая, нормированный круг, спираль.
-"""
+"""Configuration constants for the ML pipeline."""
 from __future__ import annotations
 from dataclasses import dataclass
 
-# ---------------------------------------------------------------------------
-# Физические ограничения скорости
-# ---------------------------------------------------------------------------
+# Speed limits.
+MIN_SPEED: float = 0.1   # Minimum target speed V*.
+MAX_SPEED: float = 10.0  # Maximum target speed V*.
+SPEED_STEP: float = 0.1  # Search step used by the oracle.
 
-MIN_SPEED: float = 0.1   # минимальная параметрическая скорость V*
-MAX_SPEED: float = 3.0   # максимальная параметрическая скорость V*
-                         # (жёсткое ограничение: oracle и нейросеть НЕ могут превышать)
+# Oracle simulation parameters.
+# dt=0.005 + kappa=100 — рабочая пара: |1 - k×a1×dt| = |1 - 100×5×0.005| = 0.5 < 1.
+# При dt=0.01 коэффициент = 0 (нейтральный), наблюдатель осциллирует при начальных возмущениях.
+# dt=0.005 → наблюдатель сходится за ~5 шагов (0.025 с) от любого начального состояния.
+# Совпадает с параметрами сценария run_ch4_line.py (kappa=100, dt=0.005).
+ORACLE_T: float = 20.0       # Rollout duration in seconds (legacy field, not used by OracleConfig).
+ORACLE_DT: float = 0.005     # RK4 step для oracle (kappa=100 требует dt≤0.005 для сходимости).
+ORACLE_KAPPA: float = 100.0  # Observer gain для oracle.
+ORACLE_E_MAX: float = 1.5    # Lateral-error threshold.
 
-SPEED_STEP: float = 0.1  # шаг перебора скорости в oracle
-
-# ---------------------------------------------------------------------------
-# Параметры симуляции oracle
-# ---------------------------------------------------------------------------
-
-ORACLE_T: float = 20.0       # длина симуляции для оценки стабильности (с)
-ORACLE_DT: float = 0.002     # шаг RK4 (с)
-ORACLE_KAPPA: float = 200.0  # коэффициент усиления наблюдателя
-
-# Критерий стабильности oracle: |e1|, |e2| < ORACLE_E_MAX в конце симуляции
-ORACLE_E_MAX: float = 1.5    # максимально допустимая боковая ошибка (м)
-
-# ---------------------------------------------------------------------------
-# Параметры генерации датасета
-# ---------------------------------------------------------------------------
-
-N_CURVES: int = 200          # число кривых в датасете
-N_SAMPLES_PER_CURVE: int = 5 # число состояний (s) на кривую
+# Dataset generation parameters.
+N_CURVES: int = 200          # Number of curves in the dataset.
+N_SAMPLES_PER_CURVE: int = 5 # Samples per curve.
 DATASET_FILE: str = "ml/data/dataset.npz"
 
-# ---------------------------------------------------------------------------
-# Параметры обучения MLP
-# ---------------------------------------------------------------------------
-
-MLP_HIDDEN: tuple = (64, 64)       # размеры скрытых слоёв
-MLP_LR: float = 1e-3               # learning rate (Adam)
-MLP_EPOCHS: int = 200              # число эпох
-MLP_BATCH: int = 64                # размер мини-батча
+# MLP training parameters.
+MLP_HIDDEN: tuple = (64, 64)       # Hidden layer sizes.
+MLP_LR: float = 1e-3               # Adam learning rate.
+MLP_EPOCHS: int = 200              # Training epochs.
+MLP_BATCH: int = 64                # Batch size.
 MODEL_FILE: str = "ml/data/vstar_model.pt"
 
+# Стандартный путь к обученной SpeedMLP (относительно корня проекта).
+# Используется SpeedPredictor.default() для загрузки модели по умолчанию.
+DEFAULT_MODEL_PATH: str = "code/ml/data/saved_models/speed_model.pt"
 
-# ---------------------------------------------------------------------------
-# Конфигурация oracle-поиска оптимальной скорости
-# ---------------------------------------------------------------------------
+
+def auto_rollout_horizon(
+    s_start: float,
+    s_end: float,
+    n_samples: int,
+    min_speed: float,
+    dt: float = ORACLE_DT,
+    safety: float = 1.5,
+    min_steps: int = 100,
+) -> int:
+    """Вычислить минимальный горизонт ролаута из геометрии датасета.
+
+    Идея: дрон должен успеть пройти хотя бы одну секцию между соседними
+    sample-точками, иначе оракл не поймает нестабильность, которая
+    проявляется чуть дальше по траектории.
+
+    ``min_speed`` используется как консервативная оценка: при медленной
+    скорости на один шаг тратится больше времени → нужно больше шагов.
+
+    Параметры:
+        s_start    — начало параметра кривой
+        s_end      — конец параметра кривой
+        n_samples  — число стартовых точек на кривую
+        min_speed  — минимальная параметрическая скорость V* [drone.min_speed]
+        dt         — шаг RK4 ролаута [с]
+        safety     — множитель запаса (по умолчанию 1.5×)
+        min_steps  — нижняя граница горизонта (на случай коротких кривых)
+
+    Возвращает:
+        Целое число шагов горизонта.
+
+    Пример (дефолтные параметры):
+        s_end=15, n_samples=10 → section=15/9≈1.67 → steps=ceil(1.67/0.3/0.01*1.5)=835
+        Но min_speed=0.3 → T=1.67/0.3≈5.6с → 560 шагов × 1.5 = 840
+    """
+    import math
+    section = (s_end - s_start) / max(n_samples - 1, 1)
+    steps = section / max(min_speed, 1e-6) / max(dt, 1e-9)
+    return max(min_steps, math.ceil(steps * safety))
+
 
 @dataclass
 class OracleConfig:
-    """Параметры oracle-поиска оптимальной скорости V*.
+    """Parameters for oracle speed search."""
 
-    Используется в find_optimal_speed (simulator_wrapper.py).
-    Диапазон скоростей [min_speed, max_speed] берётся из QuadModel.
+    rollout_horizon: int = 200   # 200 × dt(0.01) = 2.0 с; переопределяется auto_rollout_horizon
+    speed_step: float = 0.3
+    coarse_step: float = 0.5
+    fine_step: float = 0.1
+    min_stable_steps: int = 10
 
-    Атрибуты:
-        rollout_horizon  -- число шагов RK4 на один ролаут
-        speed_step       -- базовый шаг перебора скорости
-        coarse_step      -- шаг грубого поиска (первый проход)
-        fine_step        -- шаг точного поиска (второй проход)
-        min_stable_steps -- мин. число стабильных шагов для принятия V*
-    """
-    rollout_horizon:  int   = 30
-    speed_step:       float = 0.3
-    coarse_step:      float = 0.5
-    fine_step:        float = 0.1
-    min_stable_steps: int   = 10
-
-
-# ---------------------------------------------------------------------------
-# Удобный dataclass для передачи конфигурации ML-пайплайна
-# ---------------------------------------------------------------------------
 
 @dataclass
 class MLConfig:
-    """Параметры ML-пайплайна (все поля имеют умолчания из констант выше)."""
+    """ML pipeline configuration with defaults from module constants."""
+
     min_speed: float = MIN_SPEED
     max_speed: float = MAX_SPEED
     speed_step: float = SPEED_STEP

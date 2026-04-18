@@ -1,25 +1,7 @@
-"""
-ml/models/speed_model.py
-=========================
-MLP-модель для предсказания оптимальной параметрической скорости V*.
-
-Архитектура:
-    Linear(7 → 128) → ReLU
-    Linear(128 → 128) → ReLU
-    Linear(128 → 64)  → ReLU
-    Linear(64 → 1)    → sigmoid × MAX_SPEED
-
-Выход:
-    V_pred = sigmoid(logit) * drone.max_speed
-    Гарантия: V_pred ∈ (0, max_speed) — никогда не превышает физический предел.
-
-Публичный API:
-    SpeedMLP(max_speed, input_size)   — класс модели
-    load_speed_model(path, max_speed) — загрузить веса из файла
-    save_speed_model(model, path)     — сохранить веса в файл
-"""
+"""MLP model for target speed prediction."""
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -27,38 +9,16 @@ import torch
 import torch.nn as nn
 
 
-# Размерность входного вектора признаков (совпадает с len(extract_features(...)))
+# Input feature dimension.
 INPUT_SIZE: int = 7
 
 
 class SpeedMLP(nn.Module):
-    """MLP для предсказания оптимальной скорости V* вдоль траектории.
-
-    Параметры:
-        max_speed  — физический предел скорости V*; задаёт верхнюю границу выхода.
-                     Рекомендуется передавать drone.max_speed из QuadModel.
-        input_size — размерность входного вектора признаков (по умолчанию 7).
-
-    Вход:
-        x : Tensor[..., input_size] — нормированные признаки из extract_features:
-            [e1, e2, de2_dt, v_norm, heading_error, kappa, kappa_max_lookahead]
-
-    Выход:
-        V_pred : Tensor[..., 1] — предсказанная скорость V* ∈ (0, max_speed)
-
-    Формула выхода:
-        V_pred = sigmoid(linear_output) * max_speed
-
-    Замечание о диапазоне:
-        Теоретически sigmoid ∈ (0, 1), поэтому V_pred ∈ (0, max_speed).
-        На практике float32 насыщает sigmoid до 1.0 при |logit| > ~87,
-        поэтому при экстремальных входах возможно V_pred = max_speed точно.
-        Для принудительного ограничения снизу используй min_speed при постобработке.
-    """
+    """MLP that maps the feature vector to a target speed."""
 
     def __init__(
         self,
-        max_speed: float = 3.0,
+        max_speed: float = 10.0,
         input_size: int = INPUT_SIZE,
     ) -> None:
         super().__init__()
@@ -76,26 +36,12 @@ class SpeedMLP(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Прямой проход.
-
-        Параметры:
-            x — Tensor shape (..., input_size)
-
-        Возвращает:
-            V_pred — Tensor shape (..., 1), значения в (0, max_speed)
-        """
+        """Run the network and scale output to ``(0, max_speed)``."""
         logit = self.net(x)
         return torch.sigmoid(logit) * self.max_speed
 
     def predict(self, x: torch.Tensor) -> torch.Tensor:
-        """Инференс без градиентов (удобный псевдоним forward для использования вне обучения).
-
-        Параметры:
-            x — Tensor shape (..., input_size) или ndarray (конвертируется автоматически)
-
-        Возвращает:
-            V_pred — Tensor shape (..., 1) на CPU, detached
-        """
+        """Run inference without gradients."""
         import numpy as np
 
         if isinstance(x, np.ndarray):
@@ -116,25 +62,40 @@ class SpeedMLP(nn.Module):
         )
 
 
-# ---------------------------------------------------------------------------
-# Утилиты сохранения / загрузки
-# ---------------------------------------------------------------------------
-
-def save_speed_model(model: SpeedMLP, path: str) -> None:
-    """Сохранить веса модели в файл.
-
-    Сохраняет state_dict + метаданные (max_speed, input_size) в один .pt файл.
+def save_speed_model(model: SpeedMLP, path: str, drone=None) -> None:
+    """Сохранить веса модели и метаданные в файл.
 
     Параметры:
-        model — обученная SpeedMLP
-        path  — путь к файлу (будет создан вместе с родительскими директориями)
+        model — обученный SpeedMLP
+        path  — путь к .pt файлу
+        drone — QuadModel, параметры которого использовались при сборке датасета
+                и нормировке признаков; None → используются умолчания QuadModel()
+
+    Сохраняет `drone_params` — словарь из 5 полей, необходимых для воспроизводимого
+    инференса (нормировка признаков + диапазон V*):
+        min_speed, max_speed, lateral_error_limit,
+        tangential_error_limit, max_velocity_norm
     """
+    from drone_sim.models.quad_model import QuadModel  # локальный импорт во избежание цикличности
+
+    if drone is None:
+        drone = QuadModel()
+
+    drone_params = {
+        "min_speed":               drone.min_speed,
+        "max_speed":               drone.max_speed,
+        "lateral_error_limit":     drone.lateral_error_limit,
+        "tangential_error_limit":  drone.tangential_error_limit,
+        "max_velocity_norm":       drone.max_velocity_norm,
+    }
+
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "state_dict":  model.state_dict(),
-            "max_speed":   model.max_speed,
-            "input_size":  model.input_size,
+            "state_dict":   model.state_dict(),
+            "max_speed":    model.max_speed,
+            "input_size":   model.input_size,
+            "drone_params": drone_params,
         },
         path,
     )
@@ -145,15 +106,11 @@ def load_speed_model(
     max_speed: Optional[float] = None,
     device: str = "cpu",
 ) -> SpeedMLP:
-    """Загрузить модель из файла.
+    """Загрузить SpeedMLP из чекпоинта.
 
-    Параметры:
-        path      — путь к .pt файлу, сохранённому через save_speed_model
-        max_speed — переопределить max_speed из чекпоинта (опционально)
-        device    — устройство для загрузки ('cpu' или 'cuda')
-
-    Возвращает:
-        SpeedMLP с загруженными весами в режиме eval()
+    Параметры drone_params (если есть в чекпоинте) не применяются здесь —
+    они читаются отдельно через load_drone_params_from_checkpoint().
+    Для полного восстановления контекста используй SpeedPredictor.load().
     """
     checkpoint = torch.load(path, map_location=device, weights_only=True)
     ms = max_speed if max_speed is not None else checkpoint["max_speed"]
@@ -161,3 +118,36 @@ def load_speed_model(
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     return model
+
+
+def load_drone_params_from_checkpoint(path: str) -> dict:
+    """Загрузить параметры дрона, сохранённые в чекпоинте.
+
+    Возвращает словарь с ключами:
+        min_speed, max_speed, lateral_error_limit,
+        tangential_error_limit, max_velocity_norm
+
+    Если чекпоинт старого формата (без drone_params) — возвращает умолчания
+    QuadModel() с предупреждением.
+    """
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+
+    if "drone_params" not in checkpoint:
+        warnings.warn(
+            f"Чекпоинт '{path}' не содержит drone_params (старый формат). "
+            "Используются умолчания QuadModel(). Пересохраните модель с drone=QuadModel(...) "
+            "через save_speed_model, чтобы устранить это предупреждение.",
+            UserWarning,
+            stacklevel=2,
+        )
+        from drone_sim.models.quad_model import QuadModel
+        d = QuadModel()
+        return {
+            "min_speed":               d.min_speed,
+            "max_speed":               d.max_speed,
+            "lateral_error_limit":     d.lateral_error_limit,
+            "tangential_error_limit":  d.tangential_error_limit,
+            "max_velocity_norm":       d.max_velocity_norm,
+        }
+
+    return dict(checkpoint["drone_params"])

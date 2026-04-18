@@ -153,10 +153,15 @@ def generate_curve(
         curve_type — "line", "circle" или "spiral"
         rng        — генератор случайных чисел (numpy); если None — создаётся новый
 
-    Диапазоны параметров (подобраны так, чтобы ||t|| была умеренной):
-        line:   direction ~ случайный единичный вектор (||t||=1)
-        circle: r ~ U[1, 10]
-        spiral: r ~ U[1, 4], k ~ U[0.2, 2.0]
+    Диапазоны параметров подобраны для РАЗНООБРАЗИЯ V_opt в датасете:
+        line:   direction ~ случайный единичный вектор (||t||=1, кривизна=0)
+                Прямые не ограничивают V* — используются только для обобщения.
+        circle: r ~ U[0.5, 5.0]  →  κ = 1/r ∈ [0.2, 2.0]
+                Нормированный круг: ||t||=1 при любом r.
+                Малые r (тугие повороты) реально ограничивают V*.
+        spiral: r ~ U[0.5, 2.5],  k = max(sqrt(1 - r²) + 0.1, U[0.3, 1.5])
+                ||t|| = sqrt(r²+k²) ≥ 1.0 гарантируется выбором k.
+                Малые r + умеренный k → высокая кривизна → ограничение V*.
     """
     if rng is None:
         rng = np.random.default_rng()
@@ -168,12 +173,20 @@ def generate_curve(
         return make_line_curve(d)
 
     elif curve_type == "circle":
-        r = float(rng.uniform(1.0, 10.0))
+        # r ∈ [0.5, 5.0]: включает тугие круги (κ=2) для ограничения V*
+        r = float(rng.uniform(0.5, 5.0))
         return make_circle_curve(r)
 
     elif curve_type == "spiral":
-        r = float(rng.uniform(1.0, 4.0))
-        k = float(rng.uniform(0.2, 2.0))
+        # r ∈ [1.0, 3.0] — ограничение снизу для физической реализуемости.
+        # Условие физической реализуемости: beta = atan2(k, r) < 45°
+        #   (при beta > arccos(g/(L+g)) ≈ 49° дрон не может компенсировать гравитацию).
+        # Безопасное условие: k ≤ 0.9 × r  (beta < 42°, 10%-запас от предела 45°).
+        # r ≥ 1.0 гарантирует ||t|| = sqrt(r²+k²) ≥ r ≥ 1.0 при любом k ≥ 0.
+        r = float(rng.uniform(1.0, 3.0))
+        k_max = 0.9 * r   # beta < 42°
+        k_min = 0.1       # минимальный подъём, чтобы спираль не была плоской
+        k = float(rng.uniform(k_min, k_max))
         return make_spiral_curve(r, k)
 
     else:
@@ -184,7 +197,7 @@ def generate_curve(
 def generate_dataset_curves(
     n: int = 200,
     seed: int = 42,
-    type_weights: Tuple[float, float, float] = (0.2, 0.3, 0.5),
+    type_weights: Tuple[float, float, float] = (0.1, 0.4, 0.5),
 ) -> List[CurveSpec]:
     """Сгенерировать список из n допустимых кривых для датасета.
 
@@ -192,7 +205,8 @@ def generate_dataset_curves(
         n            — число кривых
         seed         — seed для воспроизводимости
         type_weights — веса для ("line", "circle", "spiral").
-                       По умолчанию: спиралей больше, т.к. они типичны для реальных задач.
+                       По умолчанию: (0.1, 0.4, 0.5) — мало прямых (они не ограничивают V*),
+                       много окружностей и спиралей с тугими поворотами.
 
     Возвращает:
         List[CurveSpec] длиной n

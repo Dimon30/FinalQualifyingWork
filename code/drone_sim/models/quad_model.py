@@ -71,10 +71,10 @@ class QuadModel:
     J_psi:   float = 1.0   # момент инерции по крену    [кг·м²]
 
     # --- Лётные ограничения ---
-    max_speed:              float = 3.0   # макс. параметрическая скорость V*
+    max_speed:              float = 10.0   # макс. параметрическая скорость V*
     min_speed:              float = 0.3   # мин. параметрическая скорость V*
-    max_accel:              float = 1.0   # макс. линейное ускорение [м/с²]
-    max_velocity_norm:      float = 6.0   # порог разлёта ||v|| [м/с]
+    max_accel:              float = 3.0   # макс. линейное ускорение [м/с²]
+    max_velocity_norm:      float = 10.0   # порог разлёта ||v|| [м/с]
     lateral_error_limit:    float = 0.5   # предел |e2| [м]
     tangential_error_limit: float = 0.7   # предел |e1| [м]
     nan_is_failure:         bool  = True  # NaN/Inf в состоянии → отказ

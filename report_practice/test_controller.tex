@@ -1,0 +1,96 @@
+%! Author = Admin
+%! Date = 18.04.2026
+
+\section{Тестирование корректной работы контроллера}
+
+Разработана автоматизированная проверка корректности выполнения симуляции.
+Каждый тест запускает полное моделирование движения квадрокоптера по одной из типовых кривых и проверяет финальную норму боковой ошибки
+\begin{gather}
+    \left\|
+        \begin{bmatrix}
+            e_1(T) \\
+            e_2(T)
+        \end{bmatrix}
+    \right\| < \varepsilon_{\mathrm{pass}},
+    \qquad
+    \varepsilon_{\mathrm{pass}} = 1.5 \ \text{м}.
+\end{gather}
+Набор тестовых траекторий включает:
+\begin{enumerate}
+    \item круговую спираль с радиусом $r=3$;
+    \item горизонтальную окружность радиуса $r=3$;
+    \item спираль с радиусом $r=2$;
+    \item пространственную прямую $x=s,\ y=s,\ z=s$;
+    \item прямую в плоскости $XZ$: $x=s,\ y=0,\ z=0.5s$;
+    \item плотную спираль с радиусом $r=1.5$.
+\end{enumerate}\hfill\break
+Для прямых используется аналитическая функция ближайшей точки, а для спиралей - динамический наблюдатель.
+Такой подход позволяет проверить корректность регулятора при разных значениях кривизны, различной норме касательного вектора и разных начальных условиях.\\
+В ходе тестирования анализируются:
+\begin{enumerate}
+    \item финальные ошибки $e_1(T)$ и $e_2(T)$;
+    \item норма скорости $\|v(T)\|$;
+    \item устойчивость наблюдателя ближайшей точки;
+    \item корректность выбора шага $\Delta t$ при заданном $\kappa$.
+\end{enumerate}\hfill\break
+Кроме логической проверки \texttt{PASS/FAIL}, для каждого сценария автоматически сохраняются графики траектории, ошибок, скорости и углов.
+Это упрощает локализацию режимов, в которых требуется перенастройка коэффициентов.
+
+На рисунках~\ref{fig:line_3d}--\ref{fig:circle_errors} приведены результаты трёх типовых сценариев: движение по пространственной прямой, спирали и горизонтальной окружности.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_line_3d}
+        \caption{Траектория, прямая}
+        \label{fig:line_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_line_errors}
+        \caption{Ошибки слежения, прямая}
+        \label{fig:line_errors}
+    \end{subfigure}
+    \caption{Результаты моделирования: пространственная прямая ($V^{\ast}=1.0$, $T=40$ с)}
+    \label{fig:line_results}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_spiral_3d}
+        \caption{Траектория, спираль $r{=}3$}
+        \label{fig:spiral_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ch4_spiral_errors}
+        \caption{Ошибки слежения, спираль $r{=}3$}
+        \label{fig:spiral_errors}
+    \end{subfigure}
+    \caption{Результаты моделирования: спираль $r{=}3$ ($V^{\ast}=1.0$, $T=40$ с)}
+    \label{fig:spiral_results}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/circle_r3_z5_traj_3d}
+        \caption{Траектория, окружность $r{=}3$, $z{=}5$}
+        \label{fig:circle_3d}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/circle_r3_z5_errors}
+        \caption{Ошибки слежения, окружность}
+        \label{fig:circle_errors}
+    \end{subfigure}
+    \caption{Результаты моделирования: горизонтальная окружность $r{=}3$, $z{=}5$ ($V^{\ast}=1.0$, $T=40$ с)}
+    \label{fig:circle_results}
+\end{figure}

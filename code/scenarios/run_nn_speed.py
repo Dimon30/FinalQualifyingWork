@@ -75,17 +75,24 @@ def _make_scenario(name: str) -> tuple[CurveGeom, dict, str]:
 # Загрузка NN модели
 # ---------------------------------------------------------------------------
 
-def _load_speed_fn(model_path: str, curve: CurveGeom):
-    """Загрузить SpeedPredictor и вернуть (speed_fn, drone)."""
-    from ml.inference.predict import SpeedPredictor
+def _load_speed_fn(model_path: str, curve: CurveGeom, vstar_cap: float | None = None):
+    """Загрузить предиктор и вернуть (speed_fn, drone).
+
+    Поддерживает все типы моделей: mlp, sac, td3, ppo.
+    vstar_cap — жёсткий верхний предел V* (None = без ограничения).
+    """
+    from ml.models.registry import SpeedPredictorAny
     from ml.dataset.features import feature_vector
 
-    predictor = SpeedPredictor.load(model_path)
+    predictor = SpeedPredictorAny.load(model_path)
     drone = predictor.drone
 
     def speed_fn(state: np.ndarray, s: float) -> float:
         feat = feature_vector(state, curve, drone=drone, s=s)
-        return predictor.predict(feat)
+        v = predictor.predict(feat)
+        if vstar_cap is not None:
+            v = min(v, vstar_cap)
+        return v
 
     return speed_fn, drone, predictor
 
@@ -95,8 +102,13 @@ def _load_speed_fn(model_path: str, curve: CurveGeom):
 # ---------------------------------------------------------------------------
 
 def _run(curve: CurveGeom, cfg_kw: dict, Vstar: float,
-         drone: QuadModel, speed_fn=None, label: str = "") -> SimResult:
-    cfg = SimConfig(Vstar=Vstar, quad_model=drone, speed_fn=speed_fn, **cfg_kw)
+         drone: QuadModel, speed_fn=None, label: str = "",
+         warmup_time: float = 5.0, vstar_max_rate: float = 0.5) -> SimResult:
+    cfg = SimConfig(
+        Vstar=Vstar, quad_model=drone, speed_fn=speed_fn,
+        warmup_time=warmup_time, vstar_max_rate=vstar_max_rate,
+        **cfg_kw,
+    )
     print(f"  [{label}]  T={cfg.T}с  dt={cfg.dt}  kappa={cfg.kappa}", end="", flush=True)
     result = simulate_path_following(curve, cfg)
     print(f"  → e2_final={result.errors[-1, 2]:+.4f}  vel={result.velocity[-1]:.3f} м/с")
@@ -230,6 +242,16 @@ def main() -> None:
                         help="Кривая для сравнения")
     parser.add_argument("--Vstar", type=float, default=1.0,
                         help="Базовая V* для константного режима")
+    parser.add_argument("--vstar-cap", type=float, default=None,
+                        metavar="CAP",
+                        help="Верхний предел для NN-предсказания V* (None = без ограничения). "
+                             "Для spiral рекомендуется 3.5 (граница устойчивости ~4.0).")
+    parser.add_argument("--warmup", type=float, default=5.0,
+                        metavar="SEC",
+                        help="Время прогрева [с]: NN не активна, используется константная V*")
+    parser.add_argument("--vstar-rate", type=float, default=0.5,
+                        metavar="RATE",
+                        help="Макс. скорость изменения V* [1/с] при NN-управлении")
     parser.add_argument("--out", default=_DEFAULT_OUT,
                         help="Директория для сравнительных графиков")
     args = parser.parse_args()
@@ -259,21 +281,27 @@ def main() -> None:
     curve, cfg_kw, curve_label = _make_scenario(args.curve)
 
     # Загрузить NN.
-    speed_fn, drone, predictor = _load_speed_fn(model_path, curve)
+    speed_fn, drone, predictor = _load_speed_fn(model_path, curve,
+                                                 vstar_cap=args.vstar_cap)
     print(f"\nМодель  : {predictor}")
     print(f"Кривая  : {curve_label}")
     print(f"Дрон    : V* ∈ [{drone.min_speed}, {drone.max_speed}]  "
           f"lateral_e_lim={drone.lateral_error_limit}")
-    print(f"Baseline: Vstar={args.Vstar}\n")
+    print(f"Baseline: Vstar={args.Vstar}")
+    if args.vstar_cap is not None:
+        print(f"NN cap  : V*_nn ≤ {args.vstar_cap}")
+    print(f"Warmup  : {args.warmup} с   rate: {args.vstar_rate} V*/с\n")
 
     # Baseline.
     print("--- Baseline (константная V*) ---")
-    r_base = _run(curve, cfg_kw, args.Vstar, drone, speed_fn=None, label="baseline")
+    r_base = _run(curve, cfg_kw, args.Vstar, drone, speed_fn=None, label="baseline",
+                  warmup_time=args.warmup, vstar_max_rate=args.vstar_rate)
     t_base = np.linspace(0, cfg_kw["T"], len(r_base.errors))
 
     # NN.
     print("\n--- NN-оптимизатор ---")
-    r_nn = _run(curve, cfg_kw, args.Vstar, drone, speed_fn=speed_fn, label="NN")
+    r_nn = _run(curve, cfg_kw, args.Vstar, drone, speed_fn=speed_fn, label="NN",
+                warmup_time=args.warmup, vstar_max_rate=args.vstar_rate)
     t_nn = np.linspace(0, cfg_kw["T"], len(r_nn.errors))
 
     # Таблица метрик.

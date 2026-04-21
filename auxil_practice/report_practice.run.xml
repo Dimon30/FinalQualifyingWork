@@ -79,5 +79,8 @@
     <requires type="dynamic">
       <file>report_practice.bcf</file>
     </requires>
+    <requires type="editable">
+      <file>references.bib</file>
+    </requires>
   </external>
 </requests>

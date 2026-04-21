@@ -249,6 +249,7 @@ class PathFollowingController:
         nearest_fn: Optional[Callable] = None,
         quad_model: Optional[QuadModel] = None,
         speed_fn: Optional[Callable] = None,
+        warmup_time: float = 5.0,
     ):
         self.curve = curve
         self.Vstar = float(Vstar)          # текущий V_ref (обновляется если speed_fn задана)
@@ -257,6 +258,8 @@ class PathFollowingController:
         self._model = quad_model if quad_model is not None else QuadModel()
         self._speed_fn = speed_fn          # None → постоянная скорость (fallback)
         self._prev_V: float = float(Vstar) # предыдущий V_ref для ограничения ускорения
+        self._warmup_time: float = float(warmup_time)    # пока t < warmup_time — NN не вызывается
+        self._vstar_max_rate: float = 0.3               # переопределяется через SimConfig
 
         self._nearest = NearestPointObserver(
             curve=curve,
@@ -273,18 +276,24 @@ class PathFollowingController:
         self._s_arc: float = 0.0
         self._prev_zeta: float = float(zeta0)
 
+        # Ссылочная длина дуги: s_ref = ∫₀ᵗ V*(τ) dτ (интегратор V*).
+        # Используется вместо V*·t — обеспечивает плавность lam1[0] при изменении V*.
+        # При постоянном V*: s_ref(t) = V* · t (точно, обратная совместимость).
+        self._s_ref: float = 0.0
+
     def _lambda_tilde_1(
-        self, t: float, p_xyz: np.ndarray, phi: float, s: float
+        self, p_xyz: np.ndarray, phi: float, s: float
     ) -> np.ndarray:
         """Вектор регулируемых переменных lambda_tilde_1.
 
-        lambda_tilde_1 = col(s_arc - V*t, e1, e2, delta_phi)
-        s_arc берётся из self._s_arc — накопленного интеграла ∫||t(τ)||dτ.
+        lambda_tilde_1 = col(s_arc - s_ref, e1, e2, delta_phi)
+        s_ref = ∫₀ᵗ V*(τ) dτ — ссылочная длина дуги (плавная при изменении V*).
+        При постоянном V*: s_ref = V* · t (обратная совместимость).
         """
         _, e1, e2 = se_from_pose(p_xyz, s, self.curve)
         phi_star = float(self.curve.yaw_star(s))
         d_phi = float(np.arctan2(np.sin(phi - phi_star), np.cos(phi - phi_star)))
-        return np.array([self._s_arc - self.Vstar * float(t), e1, e2, d_phi], dtype=float)
+        return np.array([self._s_arc - self._s_ref, e1, e2, d_phi], dtype=float)
 
     def step(
         self,
@@ -310,28 +319,33 @@ class PathFollowingController:
 
         # Адаптивное обновление V_ref (если задан speed_fn)
         # Fallback: speed_fn is None → self.Vstar остаётся константой
-        if self._speed_fn is not None:
+        if self._speed_fn is not None and t >= self._warmup_time:
             try:
                 V_nn = float(self._speed_fn(x, s))
-                # Защита от NaN/Inf на выходе модели.
                 if not np.isfinite(V_nn):
                     V_nn = self._prev_V
-                # Защита от eta-windup: если боковая ошибка |e2| превышает 50% от
-                # предела стабильности — запрещаем увеличение V*, только снижение.
-                # Это предотвращает накопление η при несходящемся регуляторе.
+                # Защита от eta-windup по s_arc: дрон не успевает → запретить рост V*.
+                # Используем lam1[0] = s_arc - s_ref (реальная ошибка дуги).
+                sarc_err = self._s_arc - self._s_ref
+                if sarc_err < -0.3:
+                    V_nn = min(V_nn, self._prev_V)
+                # Защита от eta-windup по |e2|
                 _, _, e2_curr = se_from_pose(p_xyz, s, self.curve)
                 if abs(e2_curr) > self._model.lateral_error_limit * 0.5:
                     V_nn = min(V_nn, self._prev_V)
-                # Ограничение ускорения: изменение V_ref не более max_accel * dt за шаг.
-                max_dv = self._model.max_accel * dt
+                # Защита от высокой физической скорости → принудительно снизить V*
+                v_norm_curr = float(np.linalg.norm(x[3:6]))
+                if v_norm_curr > self._model.max_velocity_norm * 0.8:
+                    V_nn = self._model.min_speed
+                # Ограничение темпа изменения V*: не более vstar_max_rate за секунду.
+                max_dv = self._vstar_max_rate * dt
                 V_ref = self._prev_V + float(np.clip(V_nn - self._prev_V, -max_dv, max_dv))
-                # Клип в допустимый диапазон [min_speed, max_speed].
                 V_ref = float(np.clip(V_ref, self._model.min_speed, self._model.max_speed))
                 self.Vstar = V_ref
                 self._prev_V = V_ref
-            except Exception:
-                # При любой ошибке модели — сохраняем предыдущую скорость (fallback)
-                pass
+            except Exception as _exc:
+                import warnings
+                warnings.warn(f"speed_fn exception: {_exc}", RuntimeWarning, stacklevel=2)
 
         # Обновление накопленной длины дуги: s_arc = ∫₀^ζ ||t(τ)|| dτ
         # Метод средней точки (O(dζ²)): корректен для любой параметризации кривой.
@@ -350,7 +364,7 @@ class PathFollowingController:
         Winv = W_inv(alpha, beta_val, eps_val)
 
         # Шаг 3: вектор ошибок
-        lam1 = self._lambda_tilde_1(t, p_xyz, phi, s)
+        lam1 = self._lambda_tilde_1(p_xyz, phi, s)
 
         # Шаг 4: матрица входов b
         b = b_mat(phi, theta, psi, u1, g=self._model.g)
@@ -376,6 +390,12 @@ class PathFollowingController:
         y4_model = W @ (b @ Ubar)
         self.obs.step(y=lam1, y4_model=y4_model, dt=dt)
 
+        # Шаг 9: обновление ссылочной длины дуги s_ref = ∫₀ᵗ V*(τ) dτ.
+        # ВАЖНО: обновляем В КОНЦЕ шага, чтобы при t=0 lam1[0] = s_arc - s_ref = 0,
+        # что согласуется с warm-start (obs.x1[0] = 0). Только тогда e = 0 на первом шаге,
+        # и высокоусиленный наблюдатель (kappa=200) не взрывается из-за начальной ошибки.
+        self._s_ref += self.Vstar * dt
+
         return U.astype(float)
 
     def reset(self, zeta0: float = 0.0) -> None:
@@ -384,6 +404,7 @@ class PathFollowingController:
         self._eta[:] = 0.0
         self.obs.reset()
         self._s_arc = 0.0
+        self._s_ref = 0.0
         self._prev_zeta = zeta0
 
     @property
@@ -448,6 +469,8 @@ class SimConfig:
     nearest_fn: Optional[Callable] = None
     quad_model: Optional[QuadModel] = None
     speed_fn:   Optional[Callable] = None
+    warmup_time: float = 5.0       # первые N сек: NN отключена, используется константная Vstar
+    vstar_max_rate: float = 0.3    # макс. скорость изменения V* [параметр/с] при NN-управлении
 
 
 @dataclass
@@ -587,7 +610,9 @@ def simulate_path_following(
         nearest_fn=cfg.nearest_fn,
         quad_model=model,
         speed_fn=cfg.speed_fn,
+        warmup_time=cfg.warmup_time,
     )
+    ctrl._vstar_max_rate = cfg.vstar_max_rate
 
     # Тёплый старт наблюдателя производных (предотвращает взрыв sigma при perturbation).
     #
@@ -600,11 +625,11 @@ def simulate_path_following(
     # Для x0=0 (обычные сценарии): lam1_0 ≈ 0, vel ≈ 0 → obs ≈ 0 (обратная совместимость).
     from drone_sim.geometry.curves import Rz as _Rz, Ry as _Ry
     _zeta0 = float(cfg.zeta0)
-    lam1_0 = ctrl._lambda_tilde_1(0.0, x0[0:3], float(x0[6]), _zeta0)
+    lam1_0 = ctrl._lambda_tilde_1(x0[0:3], float(x0[6]), _zeta0)
     ctrl.obs.x1 = lam1_0.copy()
     # x2_obs ≈ dlam1/dt: Frenet-проекция начальной скорости
     # Компоненты e1, e2 изменяются со скоростью проекции vel_0 на оси Frenet-frame.
-    # Компонента s_arc: ds_arc/dt ≈ 0 (zeta не движется при t=0), V*t растёт → d(lam1[0])/dt ≈ -V*
+    # Компонента s_arc-s_ref: ds_arc/dt≈0, ds_ref/dt=V* → d(lam1[0])/dt ≈ -V*
     # Компонента d_phi: phi_dot = x0[9], yaw_star не меняется мгновенно → d(lam1[3])/dt ≈ phi_dot
     _alpha0 = float(curve.yaw_star(_zeta0))
     _beta0 = float(curve.beta(_zeta0))
@@ -621,8 +646,26 @@ def simulate_path_following(
     def dynamics(x: np.ndarray, U: np.ndarray) -> np.ndarray:
         return quad_dynamics_16(x, U, L=cfg.L, model=model)
 
+    # runner.py вызывает step() ДВАЖДЫ при t=0: сначала перед циклом (для определения
+    # размерности U), потом снова в цикле при k=0. В старом коде Vstar*t=0 при t=0,
+    # поэтому двойной вызов был безвреден. В новом коде s_ref += Vstar*dt при каждом
+    # вызове → наблюдатель получает ошибку и sigma взрывается.
+    # Решение: после pre-loop вызова восстанавливаем состояние (warm-start повторяется).
+    _pre_loop_done = [False]
+    _vstar_log: list[float] = []    # история V* по шагам (для post-hoc s_ref)
+
     def step(t: float, x: np.ndarray, Uprev, dt: float) -> np.ndarray:
-        return ctrl.step(t, x, Uprev, dt)
+        U = ctrl.step(t, x, Uprev, dt)
+        if not _pre_loop_done[0]:
+            # Это был pre-loop вызов → сбрасываем состояние до начального
+            ctrl.reset(cfg.zeta0)
+            ctrl._prev_V = cfg.Vstar
+            ctrl.obs.x1 = lam1_0.copy()
+            ctrl.obs.x2 = lam2_0.copy()
+            _pre_loop_done[0] = True
+        else:
+            _vstar_log.append(ctrl.Vstar)
+        return U
 
     raw = _simulate_raw(dynamics, step, x0, T=cfg.T, dt=cfg.dt)
     t_arr = raw["t"]
@@ -643,6 +686,19 @@ def simulate_path_following(
         else:
             s_arc_arr[k] = s_arc_arr[k - 1]
 
+    # s_ref = ∫₀ᵗ V*(τ) dτ — реконструируем из истории V* (накопленной в _vstar_log).
+    # _vstar_log[k] = V* на шаге k (начиная с k=0 первого реального шага цикла).
+    # Длина _vstar_log = n-1 (последний шаг не записывается, т.к. runner не вызывает step).
+    # Для шага k=0 s_ref=0, далее s_ref[k] = sum(V*[0..k-1]) * dt.
+    s_ref_arr = np.zeros(n, dtype=float)
+    vlog = _vstar_log if len(_vstar_log) == n - 1 else None
+    if vlog is not None:
+        for k in range(1, n):
+            s_ref_arr[k] = s_ref_arr[k - 1] + float(vlog[k - 1]) * cfg.dt
+    else:
+        # Fallback: при speed_fn=None или несоответствии длин
+        s_ref_arr = cfg.Vstar * t_arr
+
     errors = np.zeros((n, 4), dtype=float)
     for k in range(n):
         z = zeta_arr[k]
@@ -650,7 +706,7 @@ def simulate_path_following(
         phi = float(x_arr[k, 6])
         phi_star = float(curve.yaw_star(z))
         d_phi = float(np.arctan2(np.sin(phi - phi_star), np.cos(phi - phi_star)))
-        errors[k] = [s_arc_arr[k] - cfg.Vstar * t_arr[k], e1, e2, d_phi]
+        errors[k] = [s_arc_arr[k] - s_ref_arr[k], e1, e2, d_phi]
 
     velocity = np.linalg.norm(x_arr[:, 3:6], axis=1)
 

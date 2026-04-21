@@ -1,4 +1,4 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+﻿%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ПЕРЕМЕННЫЕ ДЛЯ РАБОТЫ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \newcommand{\labnumber}{1} % номер работы
@@ -43,15 +43,31 @@
 % --- БИБЛИОГРАФИЯ И ССЫЛКИ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \RequirePackage{csquotes}            % Корректные кавычки (требуется biblatex+babel)
+\RequirePackage[
+  backend=biber,
+  style=numeric,
+  sorting=none,
+  url=false,
+  doi=false,
+  isbn=false,
+  eprint=false,
+  language=auto,
+  autolang=other
+]{biblatex}                          % Поддержка библиографии
 \RequirePackage{hyperref}            % Кликабельные ссылки
-\RequirePackage{biblatex}            % Поддержка библиографии
+\RequirePackage{xurl}                % Перенос длинных URL
+\DeclareFieldFormat{title}{\iffieldundef{url}{#1}{\href{\thefield{url}}{#1}}}
+\DeclareFieldFormat[thesis]{title}{\iffieldundef{url}{#1}{\href{\thefield{url}}{#1}}}
+\AtEveryBibitem{\clearfield{type}}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ТАБЛИЦЫ И СПИСКИ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \RequirePackage{multirow}            % Объединение ячеек по вертикали
+\RequirePackage{booktabs}            % Профессиональные линии таблиц (\toprule, \midrule, \bottomrule)
 \RequirePackage{enumitem}            % Гибкая настройка списков
-%\RequirePackage{array}              % Расширенные таблицы (не используется)
+\RequirePackage{array}               % Расширенные таблицы
+\RequirePackage{longtable}           % Таблицы на несколько страниц
 %\RequirePackage{tabularx}           % Автоматическая ширина колонок (не используется)
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -135,3 +151,8 @@
   stringstyle=\color{orange},        % Строки
   showstringspaces=false
 }
+
+
+
+
+

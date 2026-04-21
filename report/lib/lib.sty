@@ -1,115 +1,106 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+﻿%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ПЕРЕМЕННЫЕ ДЛЯ РАБОТЫ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\newcommand{\labnumber}{1} % номер работы
+\newcommand{\labnumber}{1}
 \newcommand{\labteacher}{Ким Станислав Александрович}
-\newcommand{\labsubject}{Теории идентификации}  % В дательном падеже
+\newcommand{\labsubject}{Теории идентификации}
 \newcommand{\labtitle}{}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ЯЗЫК, ШРИФТЫ И ОСНОВНЫЕ НАСТРОЙКИ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{fontspec}          % Подключение системных шрифтов (нужно для XeLaTeX/LuaLaTeX)
-\RequirePackage[russian]{babel}    % Русская локализация (перевод названий, переносы)
-\setmainfont{Cambria}              % Основной шрифт документа
+\RequirePackage{fontspec}
+\RequirePackage[russian]{babel}
+\setmainfont{Cambria}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% --- РАЗМЕТКА СТРАНИЦЫ И ГЕОМЕТРИЯ ---
+% --- РАЗМЕТКА СТРАНИЦЫ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage[a4paper, left=20mm, top=15mm, right=15mm, bottom=15mm,
-                includehead, nobottom]{geometry} % Размеры полей
-\setlength{\headheight}{7pt}  % высота колонтитула
-\setlength{\headsep}{20pt}    % отступ от текста до шапки
-\setlength{\footskip}{12mm}   % отступ номера страницы от текста
+\RequirePackage[a4paper,left=20mm,top=15mm,right=15mm,bottom=15mm,includehead]{geometry}
+\setlength{\headheight}{15pt}
+\setlength{\headsep}{20pt}
+\setlength{\footskip}{12mm}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% --- ЦВЕТА И ГРАФИКА ---
+% --- ГРАФИКА И ПОДПИСИ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{graphicx}           % Вставка изображений
-\DeclareGraphicsExtensions{.pdf, .png, .jpg} % допустимые форматы картинок
-\RequirePackage{color}              % Работа с цветами
-\RequirePackage{xcolor}             % Расширенные цвета
-\RequirePackage{caption}            % Настройка подписей
-\RequirePackage{subcaption}         % Подписи к подрисункам
+\RequirePackage{graphicx}
+\DeclareGraphicsExtensions{.pdf,.png,.jpg}
+\RequirePackage{color}
+\RequirePackage{xcolor}
+\RequirePackage{caption}
+\RequirePackage{subcaption}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- МАТЕМАТИКА ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{amsmath, amssymb, amsfonts, bm} % Расширенная математика и жирные символы
-\setcounter{MaxMatrixCols}{40}       % Увеличение максимального числа столбцов в матрицах
-\RequirePackage{siunitx}             % Красивые единицы измерений и числа
+\RequirePackage{amsmath,amssymb,amsfonts,bm}
+\setcounter{MaxMatrixCols}{40}
+\RequirePackage{siunitx}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% --- БИБЛИОГРАФИЯ И ССЫЛКИ ---
+% --- ССЫЛКИ И БИБЛИОГРАФИЯ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{hyperref}            % Кликабельные ссылки
-\RequirePackage{biblatex}            % Поддержка библиографии
+\RequirePackage{hyperref}
+\RequirePackage{biblatex}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ТАБЛИЦЫ И СПИСКИ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{multirow}            % Объединение ячеек по вертикали
-\RequirePackage{enumitem}            % Гибкая настройка списков
-%\RequirePackage{array}              % Расширенные таблицы (не используется)
-%\RequirePackage{tabularx}           % Автоматическая ширина колонок (не используется)
+\RequirePackage{multirow}
+\RequirePackage{booktabs}
+\RequirePackage{longtable}
+\RequirePackage{enumitem}
+\RequirePackage{array}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ВСПОМОГАТЕЛЬНЫЕ ПАКЕТЫ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{calc}                % Арифметика с длинами
-\RequirePackage{wasysym}             % Доп. символы
-\RequirePackage{placeins}            % \FloatBarrier — запрет перепрыгивания float’ов
-\RequirePackage{float}               % Жёсткое позиционирование float’ов
+\RequirePackage{calc}
+\RequirePackage{wasysym}
+\RequirePackage{placeins}
+\RequirePackage{float}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% --- РИСОВАНИЕ СХЕМ ---
+% --- TIKZ И СХЕМЫ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{circuitikz}          % Электрические схемы
-\usetikzlibrary{arrows.meta, positioning, shapes.geometric, calc} % Доп. библиотеки TikZ
-%\RequirePackage{tikz}               % Базовый TikZ (не используется)
+\RequirePackage{circuitikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% --- ОФОРМЛЕНИЕ ГЛАВ И РАЗДЕЛОВ ---
+% --- ОФОРМЛЕНИЕ ЗАГОЛОВКОВ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{titlesec}            % Кастомизация заголовков
+\RequirePackage{titlesec}
 
-\titleformat{\chapter}[hang]         % Формат заголовков глав
+\titleformat{\chapter}[hang]
   {\normalfont\LARGE\bfseries}
   {Глава \thechapter.}{0.8em}{}
 \titlespacing{\chapter}{0pt}{-10pt}{15pt}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% --- ШАПКИ И НИЗ СТРАНИЦЫ ---
+% --- КОЛОНТИТУЛЫ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{fancyhdr}            % Красивые колонтитулы
+\RequirePackage{fancyhdr}
 \pagestyle{fancy}
-
-% Очистка и статичные элементы шапки
 \fancyhf{}
 \fancyhead[L]{}
 \fancyhead[R]{}
 \fancyfoot[C]{\thepage}
-
-% Толщина линий
 \renewcommand{\headrulewidth}{0pt}
 \renewcommand{\footrulewidth}{0pt}
-
-% Убираем метки заголовков в колонтитулах
 \renewcommand{\chaptermark}[1]{}
 \renewcommand{\sectionmark}[1]{}
 \renewcommand{\subsectionmark}[1]{}
 
-% Для страниц «plain» (например, первая страница главы)
 \fancypagestyle{plain}{%
     \fancyhf{}
-    \fancyhead[L]{Лабораторная работа №\labnumber}
-    \fancyhead[R]{\textit{\labtitle}}
+    \fancyhead[L]{}
+    \fancyhead[R]{}
     \fancyfoot[C]{\thepage}
     \renewcommand{\headrulewidth}{0pt}
     \renewcommand{\footrulewidth}{0pt}
 }
 
-% Возвращаем стиль после содержания
 \let\oldtableofcontents\tableofcontents
 \renewcommand{\tableofcontents}{%
     \cleardoublepage
@@ -122,17 +113,17 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ЛИСТИНГИ КОДА ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{listings}            % Для вставки исходного кода
+\RequirePackage{listings}
 \lstset{
-  basicstyle=\ttfamily\small,        % Шрифт кода
-  numbers=left,                      % Номера строк
+  basicstyle=\ttfamily\small,
+  numbers=left,
   numberstyle=\tiny\color{gray},
   stepnumber=1,
   numbersep=5pt,
-  frame=single,                      % Рамка
+  frame=single,
   rulecolor=\color{black},
-  keywordstyle=\color{blue},         % Подсветка ключевых слов
-  commentstyle=\color{green!50!black}, % Комментарии
-  stringstyle=\color{orange},        % Строки
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{orange},
   showstringspaces=false
 }

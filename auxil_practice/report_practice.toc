@@ -9,17 +9,21 @@
 \contentsline {subsection}{\numberline {3.2}Наблюдатель производных}{7}{subsection.3.2}%
 \contentsline {subsection}{\numberline {3.3}Параметры настройки и физический смысл}{8}{subsection.3.3}%
 \contentsline {subsection}{\numberline {3.4}Критерии качества управления}{8}{subsection.3.4}%
-\contentsline {section}{\numberline {4}Тестирование корректной работы контроллера}{8}{section.4}%
-\contentsline {section}{\numberline {5}Сбор датасета ограниченного семейства кривых}{10}{section.5}%
-\contentsline {subsection}{\numberline {5.1}Семейство допустимых кривых}{10}{subsection.5.1}%
-\contentsline {subsection}{\numberline {5.2}Формирование обучающего примера}{10}{subsection.5.2}%
-\contentsline {subsection}{\numberline {5.3}Оракул выбора целевой скорости}{11}{subsection.5.3}%
-\contentsline {subsection}{\numberline {5.4}Структура датасета}{11}{subsection.5.4}%
-\contentsline {subsection}{\numberline {5.5}Предварительная обработка и разбиение}{11}{subsection.5.5}%
-\contentsline {section}{\numberline {6}Разработка архитектуры полносвязной нейронной сети}{12}{section.6}%
-\contentsline {subsection}{\numberline {6.1}Постановка задачи аппроксимации}{12}{subsection.6.1}%
-\contentsline {subsection}{\numberline {6.2}Архитектура сети}{12}{subsection.6.2}%
-\contentsline {subsection}{\numberline {6.3}Функция потерь и обучение}{12}{subsection.6.3}%
-\contentsline {subsection}{\numberline {6.4}Интеграция сети в систему управления}{13}{subsection.6.4}%
-\contentsline {section}{\numberline {7}Визуализация результатов и выводы}{13}{section.7}%
-\contentsline {section}{\numberline {8}Заключение}{14}{section.8}%
+\contentsline {section}{\numberline {4}Тестирование корректной работы контроллера}{9}{section.4}%
+\contentsline {section}{\numberline {5}Сбор датасета ограниченного семейства кривых}{11}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Семейство допустимых кривых}{11}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Формирование обучающего примера}{11}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Оракул выбора целевой скорости}{12}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Структура датасета}{13}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}Предварительная обработка и разбиение}{13}{subsection.5.5}%
+\contentsline {section}{\numberline {6}Разработка архитектуры полносвязной нейронной сети}{14}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Постановка задачи аппроксимации}{14}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Архитектура сети}{14}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Функция потерь и обучение}{14}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Интеграция сети в систему управления}{15}{subsection.6.4}%
+\contentsline {subsubsection}{\numberline {6.4.1}Интегратор опорной дуги}{15}{subsubsection.6.4.1}%
+\contentsline {subsubsection}{\numberline {6.4.2}Период прогрева и защитный механизм}{15}{subsubsection.6.4.2}%
+\contentsline {section}{\numberline {7}Визуализация результатов и выводы}{16}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Сравнительный анализ режимов управления}{16}{subsection.7.1}%
+\contentsline {section}{\numberline {8}Заключение}{19}{section.8}%
+\contentsline {section}{Список литературы}{20}{Item.51}%

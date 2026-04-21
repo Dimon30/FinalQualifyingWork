@@ -33,7 +33,9 @@
 
 4. **Методы обучения с подкреплением для оптимизации скорости** — исследование подходов к адаптивному выбору параметрической скорости V*. На текущем этапе реализован supervised-подход (oracle + SpeedMLP); RL-подход (PPO/SAC) запланирован как следующий шаг.
 
-5. **Сравнительный анализ** — сопоставление базовой симуляции с константной V* и нейросетевого оптимизатора по метрикам ошибки слежения (e1, e2, RMS) и средней скорости движения.
+5. **Сравнительный анализ** — сопоставление базовой симуляции с константной V* и нейросетевого оптимизатора по метрикам ошибки слежения (e1, e2, RMS) и средней скорости движения. Демонстрация: NN увеличивает скорость в 2.8× при сохранении устойчивости на спирали r=3.
+
+6. **RL-архитектуры (offline) для V*** — реализованы три архитектуры (SAC, TD3, PPO), обучаемые на том же CSV-датасете, что и MLP, но с разными функциями потерь. Единый реестр моделей (`registry.py`) и `SpeedPredictorAny` обеспечивают взаимозаменяемый инференс.
 
 ---
 
@@ -88,6 +90,9 @@ python code/scenarios/run_ch4_line.py
 
 # Движение вдоль спирали r=3:
 python code/scenarios/run_ch4_spiral.py
+
+# Движение вдоль горизонтального круга r=3, z=5 (||t||=1):
+python code/scenarios/run_ch4_circle.py
 ```
 
 Графики сохраняются в `code/out_images/ch4_line/` и `code/out_images/ch4_spiral/`.
@@ -112,11 +117,12 @@ pytest code/tests/ -v
 ### 4. Тестовый запуск дрона с произвольной кривой
 
 ```bash
-# Базовая симуляция (эллиптическая спираль, константная V*):
+# Базовая симуляция (спираль r=3, константная V*):
 python code/scenarios/run_test_drone.py
 
 # С NN-оптимизатором (требует обученной модели, см. шаги 6–7):
-python code/scenarios/run_test_drone.py --model auto
+# --vstar-cap ограничивает V* сверху; для спирали r=3 граница устойчивости ~4.0, рекомендуется 3.5
+python code/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
 
 # Указать собственную директорию для результатов:
 python code/scenarios/run_test_drone.py --out code/out_images/my_experiment
@@ -124,10 +130,13 @@ python code/scenarios/run_test_drone.py --out code/out_images/my_experiment
 
 Графики по умолчанию сохраняются в `code/out_images/test_drone/`.
 
-### 5. Сборка небольшого датасета
+### 5. Сборка небольшого датасета (тест)
 
 ```bash
-python code/scenarios/run_build_dataset.py --curves 10 --samples 20
+# --oracle-horizon 4000 = 4000×0.005с = 20с — достаточно для проверки стабильности
+# Без этого флага oracle использует горизонт ~1с (200 шагов × 0.005) и объявляет V*=9.9
+# "стабильным" там, где реальная симуляция взрывается
+python code/scenarios/run_build_dataset.py --curves 10 --samples 20 --oracle-horizon 4000
 ```
 
 Датасет сохраняется в `code/ml/data/dataset.csv`.
@@ -139,33 +148,71 @@ python code/scenarios/run_build_dataset.py --curves 10 --samples 20
 python code/scenarios/train_speed_model.py --epochs 100 --patience 15
 ```
 
-Модель сохраняется в `code/ml/data/model/speed_model.pt`.
+Модель сохраняется в `code/ml/data/saved_models/speed_model.pt`.
 Графики качества — в `code/out_images/training/`.
 
 ### 7. Инференс: симуляция с NN-оптимизатором
 
 ```bash
-# Стандартный путь (code/ml/data/model/speed_model.pt):
-python code/scenarios/run_test_drone.py --model default
+# Стандартный путь (code/ml/data/saved_models/speed_model.pt):
+python code/scenarios/run_test_drone.py --model default --vstar-cap 3.5
 
-# Авто-поиск последней модели:
-python code/scenarios/run_test_drone.py --model auto
+# Авто-поиск последней модели в code/ml/data/:
+python code/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
 ```
 
-### 8. Сравнение: константная V* vs NN
+> **Важно.** `--vstar-cap` ограничивает максимальную V*, выдаваемую нейросетью. Текущая модель может предсказывать V*≈9 во время полёта; без ограничения дрон уйдёт в расходимость. Рекомендуемое значение для спирали r=3: `--vstar-cap 3.5`.
+
+### 8. Сравнение: константная V* vs MLP-оптимизатор
 
 ```bash
-# На спирали r=3:
-python code/scenarios/run_nn_speed.py --curve spiral
+# На спирали r=3 (демо с проверенными параметрами):
+# --vstar-cap 3.5    — ограничение V* сверху (граница устойчивости ~4.0)
+# --vstar-rate 0.3   — максимальный темп изменения V* (с⁻¹), сглаживает скачки
+python code/scenarios/run_nn_speed.py \
+    --curve spiral \
+    --model code/ml/data/saved_models/speed_model.pt \
+    --vstar-cap 3.5 \
+    --vstar-rate 0.3
 
 # На прямой:
-python code/scenarios/run_nn_speed.py --curve line
+python code/scenarios/run_nn_speed.py --curve line --vstar-cap 3.5 --vstar-rate 0.3
 
 # Сохранить в отдельную директорию:
-python code/scenarios/run_nn_speed.py --curve spiral --out code/out_images/compare_spiral
+python code/scenarios/run_nn_speed.py --curve spiral --vstar-cap 3.5 --out code/out_images/compare_spiral
 ```
 
 Сравнительные графики сохраняются в `code/out_images/nn_speed/` (по умолчанию).
+
+> **Результат демо** (спираль r=3): NN-оптимизатор увеличивает среднюю скорость в **2.8×** (1.0 → 2.8 м/с) при сохранении сходимости e₂ → 0, максимальная поперечная ошибка 0.043 м << предела 0.5 м.
+
+### 9. Обучение RL-архитектуры (SAC / TD3 / PPO)
+
+```bash
+# Обучить SAC-модель (требует dataset.csv из шага 5):
+python code/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
+
+# TD3 и PPO аналогично:
+python code/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
+python code/scenarios/train_rl_model.py --model ppo
+
+# Модели сохраняются в code/ml/data/saved_models/{sac,td3,ppo}_model.pt
+```
+
+### 10. Сравнение RL-модели с константной V*
+
+```bash
+# По кодовому имени (автопоиск .pt файла):
+python code/scenarios/run_compare_models.py --model sac --curve spiral --vstar-cap 3.5
+python code/scenarios/run_compare_models.py --model td3 --curve line
+python code/scenarios/run_compare_models.py --model ppo --curve circle
+
+# Явный путь к чекпоинту:
+python code/scenarios/run_compare_models.py \
+    --model code/ml/data/saved_models/sac_model.pt --curve spiral --vstar-cap 3.5
+```
+
+Сравнительные графики сохраняются в `code/out_images/compare_rl/`.
 
 ---
 
@@ -193,7 +240,7 @@ code/
     nn/
       __init__.py             — placeholder: будущие RL-алгоритмы V*
 
-  ml/                         — ML-пайплайн оптимизации V* (supervised)
+  ml/                         — ML-пайплайн оптимизации V* (supervised + offline RL)
     config.py                 — MLConfig, OracleConfig, DEFAULT_MODEL_PATH
     curves/
       generator.py            — CurveSpec, make_line/circle/spiral_curve
@@ -203,19 +250,27 @@ code/
       simulator_wrapper.py    — rollout_with_speed, is_stable, find_optimal_speed
     models/
       speed_model.py          — SpeedMLP (128→128→64→1), save/load_speed_model
+      sac_model.py            — SpeedSAC: Gaussian actor + twin Q-critics
+      td3_model.py            — SpeedTD3: детерминированный актор + Polyak targets
+      ppo_model.py            — SpeedPPO: Gaussian policy + value + clipped surrogate
+      registry.py             — get_speed_model, save/load_speed_model_any, SpeedPredictorAny
     training/
       train_model.py          — train() с early stopping, TrainResult
+      train_rl_models.py      — train_rl(): SAC/TD3/PPO offline на CSV
     inference/
       predict.py              — SpeedPredictor: load/predict/default
-    data/                     — dataset.csv, model/speed_model.pt  ← не коммитить
+    data/                     — dataset.csv, saved_models/*.pt  ← не коммитить
 
   scenarios/
     run_ch4_line.py           — Гл. 4 диссертации: прямая (стр. 41)
     run_ch4_spiral.py         — Гл. 4 диссертации: спираль r=3 (стр. 43–44)
-    run_test_drone.py         — тестовый запуск дрона с произвольной кривой (+ NN)
+    run_ch4_circle.py         — горизонтальный круг r=3, z=5 (||t||=1)
+    run_test_drone.py         — тестовый запуск дрона, спираль r=3 (поддержка --model, --vstar-cap)
     run_build_dataset.py      — сборка датасета (oracle V*)
     train_speed_model.py      — обучение SpeedMLP + графики качества
-    run_nn_speed.py           — сравнение: константная V* vs NN-оптимизатор
+    run_nn_speed.py           — сравнение: константная V* vs MLP-оптимизатор
+    train_rl_model.py         — обучение SAC/TD3/PPO/MLP на CSV (единый CLI)
+    run_compare_models.py     — сравнение любой модели (mlp|sac|td3|ppo) с константной V*
 
   tests/
     conftest.py               — sys.path + --fast hook
@@ -295,8 +350,10 @@ b(φ, θ, ψ, u1) = Rz(φ) · B_inner
 
 2. **Ошибки в системе координат Френе** (ур. 60):
    ```
-   λ̃₁ = [s_arc − V*t,  e₁,  e₂,  δφ]
+   λ̃₁ = [s_arc − s_ref,  e₁,  e₂,  δφ]
    ```
+   где `s_ref = ∫₀ᵗ V*(τ)dτ` — интегральный накопитель опорной скорости (при адаптивном V* корректнее, чем `V*·t`).
+
 
 3. **Наблюдатель производных** (ур. 73–77):
    Пятиступенчатый наблюдатель высокого усиления κ оценивает `λ̃₁` и её производные до 4-го порядка.
@@ -356,7 +413,7 @@ b(φ, θ, ψ, u1) = Rz(φ) · B_inner
 
 #### Oracle: метка для обучения
 
-Oracle перебирает V* в диапазоне `[min_speed, max_speed]` с шагом `speed_step` и для каждой кривой находит максимальное стабильное значение через короткий rollout-ролаут (20 с, kappa=100, dt=0.01). Стабильность определяется по трём критериям:
+Oracle перебирает V* в диапазоне `[min_speed, max_speed]` с шагом `speed_step` и для каждой кривой находит максимальное стабильное значение через rollout-симуляцию (kappa=100, dt=0.005). Стабильность определяется по трём критериям:
 - `|e2| < lateral_error_limit`
 - `||v|| < max_velocity_norm`
 - отсутствие NaN/Inf в состоянии
@@ -383,13 +440,15 @@ Oracle перебирает V* в диапазоне `[min_speed, max_speed]` с
 from drone_sim.models.quad_model import QuadModel
 
 drone = QuadModel(
-    max_speed=3.0,               # верхняя граница V* (oracle + нормировка v_norm)
+    max_speed=10.0,              # верхняя граница V* (oracle + нормировка v_norm)
     min_speed=0.3,               # нижняя граница V*
     lateral_error_limit=0.5,    # oracle: порог |e2|, нормировка e2
     tangential_error_limit=0.7, # нормировка e1
-    max_velocity_norm=6.0,      # oracle: порог ||v||, нормировка de2_dt
+    max_velocity_norm=10.0,     # oracle: порог ||v||, нормировка de2_dt
 )
 ```
+
+> **Важно.** `max_speed=10.0` должен быть одинаковым на всех трёх шагах (датасет → обучение → инференс). Несоответствие приводит к R²≈0 при обучении (метки ∈[0, 10], выход модели ∈[0, 3]).
 
 Параметры сохраняются в `.pt`-чекпоинт и автоматически восстанавливаются при `SpeedPredictor.load()`.
 
@@ -438,13 +497,15 @@ result.plot("code/out_images/my_curve")
 | `gamma_nearest` | Коэффициент наблюдателя ближайшей точки | зависит от кривой |
 | `nearest_fn` | Аналитика ближайшей точки | для прямых: `nearest_point_line` |
 | `speed_fn` | NN-оптимизатор `callable(state, s) → V*` | `SpeedPredictor.load(...)` |
+| `warmup_time` | Время прогрева (speed_fn не активна) | 5.0 с |
+| `vstar_max_rate` | Макс. темп изменения V* (с⁻¹), сглаживает скачки | 0.3 |
 
 ### Выходные данные SimResult
 
 ```python
 result.t          # [n]: массив времени
 result.x          # [n×16]: траектория состояния
-result.errors     # [n×4]: s_arc−V*t, e1, e2, δφ
+result.errors     # [n×4]: s_arc−s_ref, e1, e2, δφ  (s_ref = ∫V*(τ)dτ — реальная ошибка контроллера)
 result.velocity   # [n]: норма скорости ||v||
 result.zeta       # [n]: параметр ближайшей точки
 result.p_ref      # [n×3]: ближайшие точки на кривой
@@ -458,16 +519,24 @@ result.p_ref      # [n×3]: ближайшие точки на кривой
 
 ```bash
 # Шаг 1. Собрать датасет (рекомендуемые параметры для полного обучения):
-python code/scenarios/run_build_dataset.py --curves 200 --samples 10
+# --oracle-horizon 4000 критично: 4000×0.005с = 20с (по умолчанию 200 шагов = 1с — недостаточно!)
+# --coarse-fine — точнее (грубый шаг 0.5, затем точный 0.1), чуть медленнее
+python code/scenarios/run_build_dataset.py \
+    --curves 1000 --samples 10 \
+    --oracle-horizon 4000
 
 # Шаг 2. Обучить SpeedMLP:
 python code/scenarios/train_speed_model.py --epochs 200 --patience 20
 
 # Шаг 3. Инференс (тестовый запуск с NN):
-python code/scenarios/run_test_drone.py --model default
+python code/scenarios/run_test_drone.py --model default --vstar-cap 3.5
 
 # Шаг 4. Сравнение с baseline:
-python code/scenarios/run_nn_speed.py --curve spiral
+python code/scenarios/run_nn_speed.py \
+    --curve spiral \
+    --model code/ml/data/saved_models/speed_model.pt \
+    --vstar-cap 3.5 \
+    --vstar-rate 0.3
 ```
 
 ### SpeedPredictor — глобальное имя модели
@@ -477,15 +546,71 @@ python code/scenarios/run_nn_speed.py --curve spiral
 ```python
 from ml.inference.predict import SpeedPredictor
 
-# Загрузить из стандартного пути проекта (code/ml/data/model/speed_model.pt):
+# Загрузить из стандартного пути проекта (code/ml/data/saved_models/speed_model.pt):
 predictor = SpeedPredictor.default()
 
 # Загрузить из конкретного файла:
-predictor = SpeedPredictor.load("code/ml/data/model/speed_model.pt")
+predictor = SpeedPredictor.load("code/ml/data/saved_models/speed_model.pt")
 
 # Предсказать V* по вектору признаков:
 V_star = predictor.predict(feature_vector(state, curve, drone=predictor.drone, s=zeta))
 ```
+
+---
+
+## RL-архитектуры (offline)
+
+Реализованы три архитектуры, обучаемые на **том же CSV-датасете**, что и SpeedMLP, но с разными функциями потерь.
+
+### Кодовые имена и архитектуры
+
+| Имя | Класс | Описание |
+|---|---|---|
+| `mlp` | `SpeedMLP` | Полносвязный, MSE, supervised |
+| `sac` | `SpeedSAC` | Gaussian actor + twin Q-critics, NLL + entropy |
+| `td3` | `SpeedTD3` | Детерминированный актор, BC + Q-guided, Polyak targets |
+| `ppo` | `SpeedPPO` | Gaussian policy + value, clipped surrogate + entropy |
+
+Все архитектуры принимают 7 признаков и возвращают V* ∈ [min_speed, max_speed].
+
+### Реестр моделей
+
+```python
+from ml.models.registry import get_speed_model, SpeedPredictorAny
+
+# Создать необученную модель:
+model = get_speed_model("sac", max_speed=10.0)
+
+# Загрузить обученный предиктор из .pt файла:
+pred = SpeedPredictorAny.load("code/ml/data/saved_models/sac_model.pt")
+v = pred.predict(feature_vector(state, curve, drone=pred.drone, s=zeta))
+```
+
+Чекпоинт хранит поле `model_type` — `load_speed_model_any()` автоматически восстанавливает правильный класс. Файлы: `{mlp→speed_model.pt, sac→sac_model.pt, td3→td3_model.pt, ppo→ppo_model.pt}`.
+
+### Обучение
+
+```bash
+# SAC (рекомендуется как первый кандидат):
+python code/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
+
+# TD3:
+python code/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
+
+# PPO:
+python code/scenarios/train_rl_model.py --model ppo
+
+# MLP (аналог train_speed_model.py):
+python code/scenarios/train_rl_model.py --model mlp
+```
+
+### Сравнение с константной V*
+
+```bash
+python code/scenarios/run_compare_models.py --model sac --curve spiral --vstar-cap 3.5 --vstar-rate 0.3
+```
+
+Выводит таблицу метрик (e2_final, e2_max, e2_rms, e1_rms, v_mean, v_final) и строит 4 графика в `code/out_images/compare_rl/`.
 
 ---
 
@@ -526,27 +651,27 @@ from drone_sim.geometry import nearest_point_line
 cfg = SimConfig(..., nearest_fn=nearest_point_line)
 ```
 
-**[ИЗВЕСТНАЯ ПРОБЛЕМА] Формула длины дуги для неравномерных кривых.**
-В `simulation/path_sim.py` используется приближение `s_arc = ζ·‖t(ζ)‖`, точное только при `‖t‖=const`.
-Для неравномерно параметризованных кривых (эллипс, парабола) это приводит к инверсии знака ошибки скорости и расходимости регулятора. Правильная формула — `s_arc = ∫₀^ζ ‖t(τ)‖ dτ`.
-До исправления контроллер гарантированно работает только на кривых с `‖t‖=const`: прямые, круговые спирали.
+**[ИСПРАВЛЕНИЕ] Формула длины дуги для произвольных кривых.**
+Прежнее приближение `s_arc = ζ·‖t(ζ)‖` было точным только при `‖t‖=const`.
+Исправлено на инкрементальный интеграл `s_arc = ∫₀^ζ ‖t(τ)‖ dτ` (метод средней точки, обновляется в каждом шаге симуляции).
+Эллиптическая спираль теперь работает: e₁=0.003 м, e₂=0.001 м.
 
 **Начальное положение.** Дрон должен стартовать вблизи кривой (≲ 1–2 м). При большом начальном отклонении наблюдатель ближайшей точки может расходиться.
 
-**ML-пайплайн.** Обучение SpeedMLP на малом датасете (< 500 записей) даёт нестабильные предсказания. Для воспроизводимых результатов рекомендуется `--curves 200 --samples 10` (≈ 2000 записей). Один и тот же `QuadModel` должен использоваться на всех трёх шагах: датасет → обучение → инференс.
+**ML-пайплайн.** Обучение SpeedMLP на малом датасете (< 500 записей) даёт нестабильные предсказания. Для воспроизводимых результатов рекомендуется `--curves 1000 --samples 10` (≈ 10 000 записей). Один и тот же `QuadModel` должен использоваться на всех трёх шагах: датасет → обучение → инференс.
 
-**Коэффициенты Гл. 2 (архив).** Реализация использует K5=diag(8,8), K6=diag(2,2) вместо K5=diag(4,4), K6=diag(1,1) из диссертации. Причина: Python-модель без инерционных матриц J требует K5>6 для устойчивости при K4=6.
+[//]: # (**Коэффициенты Гл. 2 &#40;архив&#41;.** Реализация использует K5=diag&#40;8,8&#41;, K6=diag&#40;2,2&#41; вместо K5=diag&#40;4,4&#41;, K6=diag&#40;1,1&#41; из диссертации. Причина: Python-модель без инерционных матриц J требует K5>6 для устойчивости при K4=6.)
 
 ---
 
 ## Планируемые расширения
 
-- **RL для V* (PPO/SAC).** Замена supervised oracle на обучение с подкреплением для адаптивного выбора V* без заранее собранного датасета. Placeholder: `drone_sim/nn/`.
+- **Обучение RL-моделей на большом датасете.** SAC/TD3/PPO реализованы, но обучение на датасете с `--oracle-horizon 4000` не проводилось. Ожидается более качественное предсказание V* по сравнению с MLP за счёт energy-based и Q-guided функций потерь.
 
-- **Интеграция длины дуги.** Исправление формулы `s_arc = ∫₀^ζ ‖t(τ)‖ dτ` для поддержки произвольных неравномерно параметризованных кривых (эллипс, парабола, сплайн).
+- **Online RL для V*.** Замена offline обучения на средовую симуляцию: дрон получает reward за скорость при сохранении |e2| < порога. Placeholder: `drone_sim/nn/`.
 
-- **Расширение датасета.** Добавление новых типов кривых в генератор (сплайны, составные кривые, кривые с переменной кривизной).
+- **Расширение датасета.** Добавление новых типов кривых (сплайны, составные кривые, переменная кривизна). Текущий датасет: line/circle/spiral.
 
 - **Предобработка признаков.** Нормализация по статистике датасета (StandardScaler), добавление временны́х признаков (история ошибок).
 
-- **Ансамблирование моделей.** Несколько независимо обученных SpeedMLP с усреднением или подбором по доверительному интервалу.
+- **Ансамблирование моделей.** Несколько независимо обученных моделей с усреднением или подбором по доверительному интервалу.

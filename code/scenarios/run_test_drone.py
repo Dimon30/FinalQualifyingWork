@@ -46,7 +46,7 @@ _DEFAULT_MODEL_PATH = "code/ml/data/saved_models/speed_model.pt"
 # (условие: gamma < 2 / (||t||²_max * dt) = 2 / (16.25 * 0.002) ≈ 61.5)
 # ---------------------------------------------------------------------------
 def _make_curve():
-    return make_curve(lambda s: np.array([4.0 * np.cos(s), 2.0 * np.sin(s), 0.5 * s]))
+    return make_curve(lambda s: np.array([3.0 * np.cos(s), 3.0 * np.sin(s), 0.5 * s]))
 
 
 def _make_x0() -> np.ndarray:
@@ -101,9 +101,11 @@ def _resolve_model(arg: str) -> str | None:
     return None
 
 
-def _load_speed_fn(model_path: str):
+def _load_speed_fn(model_path: str, vstar_cap: float | None = None):
     """Загрузить SpeedPredictor и вернуть speed_fn для SimConfig.
 
+    vstar_cap — жёсткий верхний предел для raw-предсказания NN.
+    Для эллиптической спирали рекомендуется vstar_cap=0.9 (граница ~1.0).
     Возвращает (speed_fn, drone) или (None, QuadModel()) при ошибке.
     """
     try:
@@ -121,7 +123,10 @@ def _load_speed_fn(model_path: str):
 
     def speed_fn(state: np.ndarray, s: float) -> float:
         feat = feature_vector(state, curve_ref, drone=drone, s=s)
-        return predictor.predict(feat)
+        v = predictor.predict(feat)
+        if vstar_cap is not None:
+            v = min(v, vstar_cap)
+        return v
 
     return speed_fn, drone
 
@@ -135,6 +140,7 @@ def run(
     Vstar: float = 1.0,
     T: float = 40.0,
     model_path: str | None = None,
+    vstar_cap: float | None = None,
 ) -> None:
     """Запустить симуляцию дрона вдоль эллиптической спирали.
 
@@ -154,7 +160,7 @@ def run(
     drone = QuadModel()
 
     if model_path is not None:
-        speed_fn, drone = _load_speed_fn(model_path)
+        speed_fn, drone = _load_speed_fn(model_path, vstar_cap=vstar_cap)
         if speed_fn is None:
             print("  Продолжаю без NN.")
 
@@ -178,6 +184,8 @@ def run(
         print(f"  Модель : {model_path}")
         print(f"  Дрон   : V* ∈ [{drone.min_speed}, {drone.max_speed}]  "
               f"lateral_e_lim = {drone.lateral_error_limit}")
+        if vstar_cap is not None:
+            print(f"  NN cap : V* ≤ {vstar_cap}")
 
     result = simulate_path_following(curve, cfg)
     result.print_summary()
@@ -216,6 +224,15 @@ def main() -> None:
         "--T", type=float, default=40.0,
         help="Время симуляции, сек",
     )
+    parser.add_argument(
+        "--vstar-cap", type=float, default=None,
+        metavar="CAP",
+        help=(
+            "Верхний предел V* для NN-предсказания. "
+            "Эллиптическая спираль устойчива до V*≈1.0 → рекомендуется 0.9. "
+            "Без ограничения NN может выдать V*>1.0 и дрон уйдёт в расходимость."
+        ),
+    )
     args = parser.parse_args()
 
     model_path = _resolve_model(args.model)
@@ -225,6 +242,7 @@ def main() -> None:
         Vstar=args.vstar,
         T=args.T,
         model_path=model_path,
+        vstar_cap=args.vstar_cap,
     )
 
 

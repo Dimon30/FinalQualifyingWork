@@ -1,27 +1,23 @@
 %! Author = Admin
-%! Date = 23.11.2024
+%! Date = 21.04.2026
 
-% Preamble
-\documentclass[11pt]{article}
+\documentclass[12pt,a4paper]{report}
 \usepackage{lib/lib}
+\addbibresource{references.bib}
 
 \begin{document}
 
-%    тема соответствует специальности + задание соответствует теме.
-%    тема, введение, обзор литературы, задание, цель и задачи
+\include{title}
+\include{task}
+\include{annotation}
+\include{contents}
 
-    \include{title} % 1-й просмотр
-    \include{task} % 1-й просмотр
-    \include{annotation}
-    \include{contents} % на отдельном листе
-    
-    \include{introduction} % 1-й просмотр
-    \include{main_part}
-    \include{conclusion}
+\include{introduction}
+\include{chapter1}
+\include{chapter2}
+\include{chapter3}
+\include{conclusion}
 
-    \include{literature_overview} % 1-й просмотр
-    \include{literature_overview_depr}
-
-
+\printbibliography[heading=bibintoc,title={Список литературы}]
 
 \end{document}

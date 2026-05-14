@@ -15,9 +15,9 @@ from ml.models.speed_model import (
 )
 
 # Default model location (relative to project root).
-_DEFAULT_MODELS_DIR = "code/ml/data/saved_models"
+_DEFAULT_MODELS_DIR = "code_app/ml/data/saved_models"
 _DEFAULT_MODEL_NAME = "speed_model.pt"
-DEFAULT_MODEL_PATH: str = "code/ml/data/saved_models/speed_model.pt"
+DEFAULT_MODEL_PATH: str = "code_app/ml/data/saved_models/speed_model.pt"
 
 
 class SpeedPredictor:
@@ -56,7 +56,7 @@ class SpeedPredictor:
 
     @classmethod
     def default(cls) -> "SpeedPredictor":
-        """Загрузить модель из стандартного пути проекта (``code/ml/data/saved_models/speed_model.pt``).
+        """Загрузить модель из стандартного пути проекта (``code_app/ml/data/saved_models/speed_model.pt``).
 
         Параметры дрона восстанавливаются из чекпоинта автоматически.
         Если файл не найден — бросает ``FileNotFoundError``.
@@ -65,8 +65,8 @@ class SpeedPredictor:
             raise FileNotFoundError(
                 f"Модель по умолчанию не найдена: {DEFAULT_MODEL_PATH}\n"
                 "Сначала запустите:\n"
-                "  python code/scenarios/run_build_dataset.py --curves 10 --samples 20\n"
-                "  python code/scenarios/train_speed_model.py"
+                "  python code_app/scenarios/run_build_dataset.py --curves 10 --samples 20\n"
+                "  python code_app/scenarios/train_speed_model.py"
             )
         return cls.load(DEFAULT_MODEL_PATH)
 

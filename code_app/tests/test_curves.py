@@ -2,11 +2,11 @@
 test_curves.py — pytest тесты согласованного управления на базовых кривых.
 
 Запуск:
-    pytest code/tests/                        # все тесты (из корня проекта)
-    pytest code/tests/ -v                     # с именами тестов
-    pytest code/tests/ -k spiral_r3          # конкретный тест
-    pytest code/tests/ --fast                 # ускоренный прогон (T×0.25)
-    pytest code/tests/ -s                     # с выводом print
+    pytest code_app/tests/                        # все тесты (из корня проекта)
+    pytest code_app/tests/ -v                     # с именами тестов
+    pytest code_app/tests/ -k spiral_r3          # конкретный тест
+    pytest code_app/tests/ --fast                 # ускоренный прогон (T×0.25)
+    pytest code_app/tests/ -s                     # с выводом print
 
 Каждый тест симулирует движение дрона вдоль заданной кривой и проверяет,
 что финальные боковые ошибки ||[e1, e2]|| < PASS_THRESHOLD.

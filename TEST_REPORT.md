@@ -23,7 +23,7 @@ pytest регистрирует этот хук **только из `conftest.py
 **Решение (применено)**  
 Перенести `pytest_addoption` из `test_curves.py` в `code/tests/conftest.py`:
 ```python
-# code/tests/conftest.py
+# code_app/tests/conftest.py
 def pytest_addoption(parser):
     parser.addoption("--fast", action="store_true", default=False,
                      help="Ускоренный прогон: T × 0.25")
@@ -47,7 +47,7 @@ def pytest_addoption(parser):
 **Решение (применено)**  
 В `SimResult.print_summary()` добавлено принудительное переключение `stdout` на UTF-8:
 ```python
-# code/drone_sim/simulation/path_sim.py  →  print_summary()
+# code_app/drone_sim/simulation/path_sim.py  →  print_summary()
 import sys
 try:
     if hasattr(sys.stdout, "reconfigure"):
@@ -59,7 +59,7 @@ except Exception:
 **Альтернатива** (переменная окружения, не требует правки кода):
 ```bash
 set PYTHONIOENCODING=utf-8
-python code/scenarios/run_test.py
+python code_app/scenarios/run_test.py
 ```
 
 ---

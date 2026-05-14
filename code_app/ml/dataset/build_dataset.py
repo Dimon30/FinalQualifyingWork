@@ -41,7 +41,7 @@ _DEFAULT_S_START: float = 0.0
 _DEFAULT_S_END: float = 15.0
 
 # Default output path.
-_DEFAULT_OUT_PATH: str = "code/ml/data/dataset.csv"
+_DEFAULT_OUT_PATH: str = "code_app/ml/data/dataset.csv"
 
 
 def _make_state_on_curve(
@@ -135,7 +135,7 @@ def generate_dataset(
     rng = np.random.default_rng(seed)
     curve_types = ["line", "circle", "spiral"]
     # Мало прямых (кривизна=0, не ограничивают V*) — больше кривых с реальными поворотами
-    type_weights = np.array([0.1, 0.4, 0.5])
+    type_weights = np.array([0.0, 0.45, 0.55])   # lines исключены: kappa=0 не ограничивает V*, oracle всегда проваливается
 
     records: list[dict] = []
     stats = {

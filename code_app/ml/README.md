@@ -17,10 +17,10 @@
 python -m ml.dataset.build_dataset --num-curves 10
 
 # 2. Обучить модель
-python -m ml.training.train_model --csv code/ml/data/dataset.csv
+python -m ml.training.train_model --csv code_app/ml/data/dataset.csv
 
 # 3. Запустить симуляцию с NN-скоростью
-python code/scenarios/run_ch4_spiral.py   # пример — нужно подключить predictor вручную
+python code_app/scenarios/run_ch4_spiral.py   # пример — нужно подключить predictor вручную
 ```
 
 Все команды выполняются из **корня проекта** (не из `code/`).
@@ -65,7 +65,7 @@ ml/
 python -m ml.dataset.build_dataset \
     --num-curves 200 \          # число кривых (не все пройдут валидацию)
     --samples 5 \               # точек на кривую
-    --out code/ml/data/dataset.csv \
+    --out code_app/ml/data/dataset.csv \
     --seed 42 \
     --coarse-fine               # двухпроходный поиск 0.5 → 0.1 (точнее, медленнее)
 ```
@@ -82,7 +82,7 @@ oracle = OracleConfig(rollout_horizon=30, speed_step=0.3)
 
 path = generate_dataset(
     num_curves=200,
-    out_path="code/ml/data/dataset.csv",
+    out_path="code_app/ml/data/dataset.csv",
     seed=42,
     n_samples_per_curve=5,
     drone=drone,
@@ -127,8 +127,8 @@ print("CSV сохранён:", path)
 
 ```bash
 python -m ml.training.train_model \
-    --csv code/ml/data/dataset.csv \
-    --out code/ml/data/model/speed_model.pt \
+    --csv code_app/ml/data/dataset.csv \
+    --out code_app/ml/data/model/speed_model.pt \
     --epochs 200 \
     --batch 64 \
     --lr 1e-3 \
@@ -143,8 +143,8 @@ python -m ml.training.train_model \
 from ml.training.train_model import train
 
 result = train(
-    csv_path="code/ml/data/dataset.csv",
-    model_path="code/ml/data/model/speed_model.pt",
+    csv_path="code_app/ml/data/dataset.csv",
+    model_path="code_app/ml/data/model/speed_model.pt",
     max_speed=3.0,
     n_epochs=200,
     batch_size=64,
@@ -179,7 +179,7 @@ from ml.dataset.features import feature_vector
 from drone_sim.models.quad_model import QuadModel
 
 drone = QuadModel(max_speed=3.0, min_speed=0.3)
-predictor = SpeedPredictor.load("code/ml/data/model/speed_model.pt", drone=drone)
+predictor = SpeedPredictor.load("code_app/ml/data/model/speed_model.pt", drone=drone)
 
 # feat — вектор из 7 признаков для текущего состояния
 feat = feature_vector(state, curve, drone=drone, s=s)
@@ -201,7 +201,7 @@ from drone_sim import make_curve, SimConfig, simulate_path_following
 from ml.inference.predict import SpeedPredictor
 from ml.dataset.features import feature_vector
 
-predictor = SpeedPredictor.load("code/ml/data/model/speed_model.pt")
+predictor = SpeedPredictor.load("code_app/ml/data/model/speed_model.pt")
 curve = make_curve(lambda s: ...)
 
 def speed_fn(state, s):

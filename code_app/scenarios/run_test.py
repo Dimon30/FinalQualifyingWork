@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, 'code')
+sys.path.insert(0, 'code_app')
 
 import numpy as np
 from drone_sim import make_curve, SimConfig, QuadModel, simulate_path_following
@@ -29,7 +29,7 @@ cfg = SimConfig(
 
 result = simulate_path_following(curve, cfg)
 result.print_summary()
-result.plot("code/out_images/test", prefix="elliptic")
+result.plot("code_app/out_images/test", prefix="elliptic")
 
 # Arc-length parameterization example for a large circle:
 # curve_big = make_curve(lambda s: np.array([130*np.cos(s/130), 130*np.sin(s/130), 0.0]))

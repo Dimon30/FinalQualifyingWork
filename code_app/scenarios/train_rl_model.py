@@ -3,16 +3,16 @@
 Использование (из корня проекта)::
 
     # Сборка датасета (если ещё нет):
-    python code/scenarios/run_build_dataset.py --curves 50 --samples 10 --oracle-horizon 4000
+    python code_app/scenarios/run_build_dataset.py --curves 50 --samples 10 --oracle-horizon 4000
 
     # Обучение конкретной модели:
-    python code/scenarios/train_rl_model.py --model sac
-    python code/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
-    python code/scenarios/train_rl_model.py --model ppo --out code/ml/data/saved_models/ppo_v1.pt
-    python code/scenarios/train_rl_model.py --model mlp --csv code/ml/data/dataset.csv
+    python code_app/scenarios/train_rl_model.py --model sac
+    python code_app/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
+    python code_app/scenarios/train_rl_model.py --model ppo --out code_app/ml/data/saved_models/ppo_v1.pt
+    python code_app/scenarios/train_rl_model.py --model mlp --csv code_app/ml/data/dataset.csv
 
     # Запуск сравнения после обучения:
-    python code/scenarios/run_compare_models.py --models sac,td3,ppo --curve spiral
+    python code_app/scenarios/run_compare_models.py --models sac,td3,ppo --curve spiral
 """
 from __future__ import annotations
 
@@ -198,7 +198,7 @@ def main() -> None:
     parser.add_argument("--csv",       default=_DEFAULT_CSV,   help="Путь к датасету CSV")
     parser.add_argument("--out",       default=None,
                         help="Путь к выходному .pt файлу (по умолчанию: "
-                             "code/ml/data/saved_models/<model>_model.pt)")
+                             "code_app/ml/data/saved_models/<model>_model.pt)")
     parser.add_argument("--epochs",    type=int,   default=300,  help="Число эпох")
     parser.add_argument("--batch",     type=int,   default=64,   help="Размер батча")
     parser.add_argument("--lr",        type=float, default=1e-3, help="Learning rate")
@@ -300,7 +300,7 @@ def main() -> None:
 
     print(f"\nМодель '{args.model.upper()}' готова: {display_path(model_out)}")
     print(f"Для сравнения запустите:")
-    print(f"  python code/scenarios/run_compare_models.py "
+    print(f"  python code_app/scenarios/run_compare_models.py "
           f"--models {args.model} --curve spiral")
 
 

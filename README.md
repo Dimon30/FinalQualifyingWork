@@ -16,8 +16,9 @@
 5. [Математическая основа](#математическая-основа)
 6. [Использование пакета drone\_sim](#использование-пакета-drone_sim)
 7. [ML-пайплайн](#ml-пайплайн)
-8. [Рекомендации и ограничения](#рекомендации-и-ограничения)
-9. [Планируемые расширения](#планируемые-расширения)
+8. [RL-архитектуры (offline)](#rl-архитектуры-offline)
+9. [Рекомендации и ограничения](#рекомендации-и-ограничения)
+10. [Планируемые расширения](#планируемые-расширения)
 
 ---
 
@@ -58,7 +59,7 @@ pip install -r requirements.txt
 pip install torch
 
 # Пакет drone_sim в режиме разработки (рекомендуется):
-pip install -e code/
+pip install -e code_app/
 ```
 
 ---
@@ -79,20 +80,20 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 pip install torch
-pip install -e code/
+export PYTHONPATH=$PYTHONPATH:$(pwd)/code_app
 ```
 
 ### 2. Базовые сценарии из Главы 4 диссертации
 
 ```bash
 # Движение вдоль прямой (x=s, y=s, z=s):
-python code/scenarios/run_ch4_line.py
+python code_app/scenarios/run_ch4_line.py
 
 # Движение вдоль спирали r=3:
-python code/scenarios/run_ch4_spiral.py
+python code_app/scenarios/run_ch4_spiral.py
 
 # Движение вдоль горизонтального круга r=3, z=5 (||t||=1):
-python code/scenarios/run_ch4_circle.py
+python code_app/scenarios/run_ch4_circle.py
 ```
 
 Графики сохраняются в `code/out_images/ch4_line/` и `code/out_images/ch4_spiral/`.
@@ -101,13 +102,13 @@ python code/scenarios/run_ch4_circle.py
 
 ```bash
 # Базовые кривые (круговая спираль + прямые):
-pytest code/tests/ -k "spiral_r3 or line_diagonal or helix_r2" -v
+pytest code_app/tests/ -k "spiral_r3 or line_diagonal or helix_r2" -v
 
 # Все 6 тестов в ускоренном режиме (T×0.25):
-pytest code/tests/ --fast -v
+pytest code_app/tests/ --fast -v
 
 # Полный прогон (занимает несколько минут):
-pytest code/tests/ -v
+pytest code_app/tests/ -v
 ```
 
 Результаты сохраняются в `code/out_images/tests/{имя_теста}/`.
@@ -118,14 +119,14 @@ pytest code/tests/ -v
 
 ```bash
 # Базовая симуляция (спираль r=3, константная V*):
-python code/scenarios/run_test_drone.py
+python code_app/scenarios/run_test_drone.py
 
 # С NN-оптимизатором (требует обученной модели, см. шаги 6–7):
 # --vstar-cap ограничивает V* сверху; для спирали r=3 граница устойчивости ~4.0, рекомендуется 3.5
-python code/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
+python code_app/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
 
 # Указать собственную директорию для результатов:
-python code/scenarios/run_test_drone.py --out code/out_images/my_experiment
+python code_app/scenarios/run_test_drone.py --out code_app/out_images/my_experiment
 ```
 
 Графики по умолчанию сохраняются в `code/out_images/test_drone/`.
@@ -136,7 +137,7 @@ python code/scenarios/run_test_drone.py --out code/out_images/my_experiment
 # --oracle-horizon 4000 = 4000×0.005с = 20с — достаточно для проверки стабильности
 # Без этого флага oracle использует горизонт ~1с (200 шагов × 0.005) и объявляет V*=9.9
 # "стабильным" там, где реальная симуляция взрывается
-python code/scenarios/run_build_dataset.py --curves 10 --samples 20 --oracle-horizon 4000
+python code_app/scenarios/run_build_dataset.py --curves 10 --samples 20 --oracle-horizon 4000
 ```
 
 Датасет сохраняется в `code/ml/data/dataset.csv`.
@@ -145,7 +146,7 @@ python code/scenarios/run_build_dataset.py --curves 10 --samples 20 --oracle-hor
 ### 6. Обучение базовой MLP-модели
 
 ```bash
-python code/scenarios/train_speed_model.py --epochs 100 --patience 15
+python code_app/scenarios/train_speed_model.py --epochs 100 --patience 15
 ```
 
 Модель сохраняется в `code/ml/data/saved_models/speed_model.pt`.
@@ -154,11 +155,11 @@ python code/scenarios/train_speed_model.py --epochs 100 --patience 15
 ### 7. Инференс: симуляция с NN-оптимизатором
 
 ```bash
-# Стандартный путь (code/ml/data/saved_models/speed_model.pt):
-python code/scenarios/run_test_drone.py --model default --vstar-cap 3.5
+# Стандартный путь (code_app/ml/data/saved_models/speed_model.pt):
+python code_app/scenarios/run_test_drone.py --model default --vstar-cap 3.5
 
-# Авто-поиск последней модели в code/ml/data/:
-python code/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
+# Авто-поиск последней модели в code_app/ml/data/:
+python code_app/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
 ```
 
 > **Важно.** `--vstar-cap` ограничивает максимальную V*, выдаваемую нейросетью. Текущая модель может предсказывать V*≈9 во время полёта; без ограничения дрон уйдёт в расходимость. Рекомендуемое значение для спирали r=3: `--vstar-cap 3.5`.
@@ -169,17 +170,17 @@ python code/scenarios/run_test_drone.py --model auto --vstar-cap 3.5
 # На спирали r=3 (демо с проверенными параметрами):
 # --vstar-cap 3.5    — ограничение V* сверху (граница устойчивости ~4.0)
 # --vstar-rate 0.3   — максимальный темп изменения V* (с⁻¹), сглаживает скачки
-python code/scenarios/run_nn_speed.py \
+python code_app/scenarios/run_nn_speed.py \
     --curve spiral \
-    --model code/ml/data/saved_models/speed_model.pt \
+    --model code_app/ml/data/saved_models/speed_model.pt \
     --vstar-cap 3.5 \
     --vstar-rate 0.3
 
 # На прямой:
-python code/scenarios/run_nn_speed.py --curve line --vstar-cap 3.5 --vstar-rate 0.3
+python code_app/scenarios/run_nn_speed.py --curve line --vstar-cap 3.5 --vstar-rate 0.3
 
 # Сохранить в отдельную директорию:
-python code/scenarios/run_nn_speed.py --curve spiral --vstar-cap 3.5 --out code/out_images/compare_spiral
+python code_app/scenarios/run_nn_speed.py --curve spiral --vstar-cap 3.5 --out code_app/out_images/compare_spiral
 ```
 
 Сравнительные графики сохраняются в `code/out_images/nn_speed/` (по умолчанию).
@@ -190,27 +191,82 @@ python code/scenarios/run_nn_speed.py --curve spiral --vstar-cap 3.5 --out code/
 
 ```bash
 # Обучить SAC-модель (требует dataset.csv из шага 5):
-python code/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
+python code_app/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
 
 # TD3 и PPO аналогично:
-python code/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
-python code/scenarios/train_rl_model.py --model ppo
+python code_app/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
+python code_app/scenarios/train_rl_model.py --model ppo
 
-# Модели сохраняются в code/ml/data/saved_models/{sac,td3,ppo}_model.pt
+# MLP через тот же интерфейс:
+python code_app/scenarios/train_rl_model.py --model mlp --epochs 200 --patience 20
+
+# Модели сохраняются в code_app/ml/data/saved_models/{sac,td3,ppo,speed}_model.pt
 ```
 
-### 10. Сравнение RL-модели с константной V*
+### 10. Запуск отдельной RL-модели на тестовой кривой
 
 ```bash
-# По кодовому имени (автопоиск .pt файла):
-python code/scenarios/run_compare_models.py --model sac --curve spiral --vstar-cap 3.5
-python code/scenarios/run_compare_models.py --model td3 --curve line
-python code/scenarios/run_compare_models.py --model ppo --curve circle
+# По кодовому имени модели (автопоиск .pt файла):
+python code_app/scenarios/run_compare_models.py --model sac --curve spiral --vstar-cap 3.5
+python code_app/scenarios/run_compare_models.py --model td3 --curve spiral --vstar-cap 3.5
+python code_app/scenarios/run_compare_models.py --model ppo --curve spiral --vstar-cap 3.5
+python code_app/scenarios/run_compare_models.py --model mlp --curve spiral --vstar-cap 3.5
 
 # Явный путь к чекпоинту:
-python code/scenarios/run_compare_models.py \
-    --model code/ml/data/saved_models/sac_model.pt --curve spiral --vstar-cap 3.5
+python code_app/scenarios/run_compare_models.py \
+    --model code_app/ml/data/saved_models/sac_model.pt --curve spiral --vstar-cap 3.5
+
+# Разные тестовые кривые:
+python code_app/scenarios/run_compare_models.py --model sac --curve circle  --vstar-cap 3.5
+python code_app/scenarios/run_compare_models.py --model sac --curve line               # без cap
+python code_app/scenarios/run_compare_models.py --model td3 --curve helix  --vstar-cap 4.0
+
+# Дополнительные параметры:
+# --vstar-cap <float>    — верхний порог V* (3.5 для спирали r=3, 4.0 для helix r=2, нет для прямой)
+# --vstar-rate <float>   — макс. темп изменения V* в с⁻¹ (рекомендуется 0.3)
+# --warmup <float>       — время прогрева в секундах (по умолчанию 5.0)
+# --Vstar-base <float>   — константная V* для baseline-режима (по умолчанию 1.0)
+# --out <dir>            — директория для графиков (по умолчанию code_app/out_images/compare_rl/)
+python code_app/scenarios/run_compare_models.py \
+    --model sac --curve spiral \
+    --vstar-cap 3.5 --vstar-rate 0.3 --warmup 5 \
+    --out code_app/out_images/my_test
 ```
+
+Каждый запуск выводит таблицу метрик в консоль (`e2_rms`, `e2_max`, `v_mean`, speedup) и сохраняет 4 графика в указанную директорию (ошибки, скорость, синхронизация, 3D-траектория).
+
+### 11. Полный бенчмарк: все модели на всех тестовых кривых
+
+```bash
+# Запустить все найденные модели на 4 стандартных кривых:
+python code_app/scenarios/run_benchmark.py
+
+# Только определённые модели:
+python code_app/scenarios/run_benchmark.py --models mlp,sac,td3,ppo
+
+# Только определённые кривые:
+python code_app/scenarios/run_benchmark.py --curves spiral_r3,circle_r3z5
+
+# Указать директорию вывода:
+python code_app/scenarios/run_benchmark.py --out code_app/out_images/benchmark
+
+# Скопировать графики сразу в report_app/images/:
+python code_app/scenarios/run_benchmark.py --report_app-images report_app/images
+```
+
+Тестовые кривые бенчмарка:
+| Имя | Кривая | Рекомендуемый vstar_cap |
+|---|---|---|
+| `spiral_r3` | спираль r=3 | 3.5 |
+| `circle_r3z5` | окружность r=3, z=5 | 3.5 |
+| `helix_r2` | крутая спираль r=2 | 4.0 |
+| `line_diag` | пространственная прямая | нет |
+
+Результаты бенчмарка:
+- `code/out_images/benchmark/{scenario}_e2.png` — e2(t) для всех моделей
+- `code/out_images/benchmark/{scenario}_velocity.png` — v(t) для всех моделей
+- `code/out_images/benchmark/summary_*.png` — сводные столбчатые диаграммы
+- `code/out_images/benchmark/summary_table.tex` — LaTeX-таблица метрик
 
 Сравнительные графики сохраняются в `code/out_images/compare_rl/`.
 
@@ -459,7 +515,7 @@ drone = QuadModel(
 ### Установка
 
 ```bash
-pip install -e code/   # После этого drone_sim доступен из любой директории
+pip install -e code_app/   # После этого drone_sim доступен из любой директории
 ```
 
 ### Полный пример
@@ -483,7 +539,7 @@ cfg = SimConfig(
 
 result = simulate_path_following(curve, cfg)
 result.print_summary()
-result.plot("code/out_images/my_curve")
+result.plot("code_app/out_images/my_curve")
 ```
 
 ### Ключевые параметры SimConfig
@@ -521,20 +577,20 @@ result.p_ref      # [n×3]: ближайшие точки на кривой
 # Шаг 1. Собрать датасет (рекомендуемые параметры для полного обучения):
 # --oracle-horizon 4000 критично: 4000×0.005с = 20с (по умолчанию 200 шагов = 1с — недостаточно!)
 # --coarse-fine — точнее (грубый шаг 0.5, затем точный 0.1), чуть медленнее
-python code/scenarios/run_build_dataset.py \
+python code_app/scenarios/run_build_dataset.py \
     --curves 1000 --samples 10 \
     --oracle-horizon 4000
 
 # Шаг 2. Обучить SpeedMLP:
-python code/scenarios/train_speed_model.py --epochs 200 --patience 20
+python code_app/scenarios/train_speed_model.py --epochs 200 --patience 20
 
 # Шаг 3. Инференс (тестовый запуск с NN):
-python code/scenarios/run_test_drone.py --model default --vstar-cap 3.5
+python code_app/scenarios/run_test_drone.py --model default --vstar-cap 3.5
 
 # Шаг 4. Сравнение с baseline:
-python code/scenarios/run_nn_speed.py \
+python code_app/scenarios/run_nn_speed.py \
     --curve spiral \
-    --model code/ml/data/saved_models/speed_model.pt \
+    --model code_app/ml/data/saved_models/speed_model.pt \
     --vstar-cap 3.5 \
     --vstar-rate 0.3
 ```
@@ -546,11 +602,11 @@ python code/scenarios/run_nn_speed.py \
 ```python
 from ml.inference.predict import SpeedPredictor
 
-# Загрузить из стандартного пути проекта (code/ml/data/saved_models/speed_model.pt):
+# Загрузить из стандартного пути проекта (code_app/ml/data/saved_models/speed_model.pt):
 predictor = SpeedPredictor.default()
 
 # Загрузить из конкретного файла:
-predictor = SpeedPredictor.load("code/ml/data/saved_models/speed_model.pt")
+predictor = SpeedPredictor.load("code_app/ml/data/saved_models/speed_model.pt")
 
 # Предсказать V* по вектору признаков:
 V_star = predictor.predict(feature_vector(state, curve, drone=predictor.drone, s=zeta))
@@ -582,7 +638,7 @@ from ml.models.registry import get_speed_model, SpeedPredictorAny
 model = get_speed_model("sac", max_speed=10.0)
 
 # Загрузить обученный предиктор из .pt файла:
-pred = SpeedPredictorAny.load("code/ml/data/saved_models/sac_model.pt")
+pred = SpeedPredictorAny.load("code_app/ml/data/saved_models/sac_model.pt")
 v = pred.predict(feature_vector(state, curve, drone=pred.drone, s=zeta))
 ```
 
@@ -592,22 +648,22 @@ v = pred.predict(feature_vector(state, curve, drone=pred.drone, s=zeta))
 
 ```bash
 # SAC (рекомендуется как первый кандидат):
-python code/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
+python code_app/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
 
 # TD3:
-python code/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
+python code_app/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
 
 # PPO:
-python code/scenarios/train_rl_model.py --model ppo
+python code_app/scenarios/train_rl_model.py --model ppo
 
 # MLP (аналог train_speed_model.py):
-python code/scenarios/train_rl_model.py --model mlp
+python code_app/scenarios/train_rl_model.py --model mlp
 ```
 
 ### Сравнение с константной V*
 
 ```bash
-python code/scenarios/run_compare_models.py --model sac --curve spiral --vstar-cap 3.5 --vstar-rate 0.3
+python code_app/scenarios/run_compare_models.py --model sac --curve spiral --vstar-cap 3.5 --vstar-rate 0.3
 ```
 
 Выводит таблицу метрик (e2_final, e2_max, e2_rms, e1_rms, v_mean, v_final) и строит 4 графика в `code/out_images/compare_rl/`.

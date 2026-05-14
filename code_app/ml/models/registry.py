@@ -174,7 +174,7 @@ class SpeedPredictorAny:
 
     Пример::
 
-        pred = SpeedPredictorAny.load("code/ml/data/saved_models/sac_model.pt")
+        pred = SpeedPredictorAny.load("code_app/ml/data/saved_models/sac_model.pt")
         v = pred.predict(feature_vector(state, curve, drone=pred.drone))
     """
 

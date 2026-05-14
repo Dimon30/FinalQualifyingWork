@@ -3,27 +3,27 @@
 Запуск (из корня проекта)::
 
     # Полный бенчмарк — все найденные модели, все кривые:
-    python code/scenarios/run_benchmark.py
+    python code_app/scenarios/run_benchmark.py
 
     # Только конкретные модели:
-    python code/scenarios/run_benchmark.py --models mlp,sac
+    python code_app/scenarios/run_benchmark.py --models mlp,sac
 
     # Только конкретные кривые:
-    python code/scenarios/run_benchmark.py --curves spiral_r3,circle_r3z5
+    python code_app/scenarios/run_benchmark.py --curves spiral_r3,circle_r3z5
 
     # Указать директорию вывода:
-    python code/scenarios/run_benchmark.py --out code/out_images/benchmark
+    python code_app/scenarios/run_benchmark.py --out code_app/out_images/benchmark
 
     # Без построения графиков (только метрики):
-    python code/scenarios/run_benchmark.py --no-plots
+    python code_app/scenarios/run_benchmark.py --no-plots
 
-Модели ищутся автоматически в code/ml/data/saved_models/:
+Модели ищутся автоматически в code_app/ml/data/saved_models/:
     mlp -> speed_model.pt
     sac -> sac_model.pt
     td3 -> td3_model.pt
     ppo -> ppo_model.pt
 
-Выходные файлы (code/out_images/benchmark/):
+Выходные файлы (code_app/out_images/benchmark/):
     {сценарий}_e2.png           — e2(t): все модели + baseline
     {сценарий}_velocity.png     — v(t)
     summary_e2_rms.png          — grouped bar chart
@@ -60,7 +60,7 @@ from ml.evaluation.plots import (
 
 _HERE = os.path.dirname(__file__)
 _MODELS_DIR = os.path.normpath(os.path.join(_HERE, "..", "ml", "data", "saved_models"))
-_DEFAULT_OUT = "code/out_images/benchmark"
+_DEFAULT_OUT = "code_app/out_images/benchmark"
 
 _MODEL_FILE = {
     "mlp": "speed_model.pt",
@@ -83,7 +83,7 @@ def _find_models(wanted: list[str]) -> dict[str, str]:
             found[name] = full
         else:
             print(f"  [!] Не найдена: {full}")
-            print(f"       Обучите: python code/scenarios/train_rl_model.py --model {name}")
+            print(f"       Обучите: python code_app/scenarios/train_rl_model.py --model {name}")
     return found
 
 
@@ -165,7 +165,7 @@ def main() -> None:
         help="Не строить графики (только таблица метрик)",
     )
     parser.add_argument(
-        "--report-images", default="",
+        "--report_app-images", default="",
         metavar="DIR",
         help="Если указано — дополнительно копировать PNG в эту директорию "
              "(удобно для report_practice/images/)",

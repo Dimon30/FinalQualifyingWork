@@ -31,8 +31,8 @@ _FEATURE_COLS = [
 _TARGET_COL = "V_opt"
 
 # Default paths.
-_DEFAULT_CSV = "code/ml/data/dataset.csv"
-_DEFAULT_MODEL = "code/ml/data/saved_models/speed_model.pt"
+_DEFAULT_CSV = "code_app/ml/data/dataset.csv"
+_DEFAULT_MODEL = "code_app/ml/data/saved_models/speed_model.pt"
 
 
 @dataclass

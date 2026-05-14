@@ -68,6 +68,7 @@ def rollout_with_speed(
     except Exception:
         return RolloutMetrics(
             max_e2=float("inf"),
+            max_lateral=float("inf"),
             final_e2=float("inf"),
             nan_detected=True,
             velocity_exploded=False,
@@ -96,7 +97,7 @@ def rollout_with_speed(
         # При правильном warm-start (x1, x2 инициализированы из начального состояния)
         # наблюдатель сходится за ~5 шагов × dt=0.005 ≈ 0.025 с.
         # 10%-skip ≈ 0.1×horizon×dt даёт дополнительный запас для любых нелинейных эффектов.
-        warmup = max(1, len(e2_series) // 10)
+        warmup = max(1, len(e2_series) // 4)   # 25% ≈ 5s для horizon=4000, совпадает с warmup_time=5s
         e1_s = e1_series[warmup:]
         e2_s = e2_series[warmup:]
         if len(e2_s) == 0:

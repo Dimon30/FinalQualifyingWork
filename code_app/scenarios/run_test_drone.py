@@ -9,11 +9,11 @@
 который адаптивно выбирает V* на каждом шаге симуляции.
 
 Запуск (из корня проекта):
-    python code/scenarios/run_test_drone.py
-    python code/scenarios/run_test_drone.py --model auto
-    python code/scenarios/run_test_drone.py --model default
-    python code/scenarios/run_test_drone.py --model code/ml/data/saved_models/speed_model.pt
-    python code/scenarios/run_test_drone.py --out code/out_images/my_run
+    python code_app/scenarios/run_test_drone.py
+    python code_app/scenarios/run_test_drone.py --model auto
+    python code_app/scenarios/run_test_drone.py --model default
+    python code_app/scenarios/run_test_drone.py --model code_app/ml/data/saved_models/speed_model.pt
+    python code_app/scenarios/run_test_drone.py --out code_app/out_images/my_run
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import argparse
 import os
 import sys
 
-# Добавить code/ в sys.path для импорта drone_sim и ml.
+# Добавить code_app/ в sys.path для импорта drone_sim и ml.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -37,8 +37,8 @@ from drone_sim.visualization.plotting import ensure_out, display_path
 # Пути по умолчанию
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(__file__)
-_DEFAULT_OUT = "code/out_images/test_drone"
-_DEFAULT_MODEL_PATH = "code/ml/data/saved_models/speed_model.pt"
+_DEFAULT_OUT = "code_app/out_images/test_drone"
+_DEFAULT_MODEL_PATH = "code_app/ml/data/saved_models/speed_model.pt"
 
 # ---------------------------------------------------------------------------
 # Кривая: эллиптическая спираль
@@ -64,8 +64,8 @@ def _resolve_model(arg: str) -> str | None:
 
     Допустимые значения:
         'none'    — не использовать NN
-        'default' — стандартный путь проекта (code/ml/data/saved_models/speed_model.pt)
-        'auto'    — найти последний .pt в code/ml/data/
+        'default' — стандартный путь проекта (code_app/ml/data/saved_models/speed_model.pt)
+        'auto'    — найти последний .pt в code_app/ml/data/
         иное      — прямой путь к файлу
     """
     if arg.lower() == "none":
@@ -78,7 +78,7 @@ def _resolve_model(arg: str) -> str | None:
                 return path
             print(f"  [ПРЕДУПРЕЖДЕНИЕ] Модель не найдена: {path}")
             return None
-        # auto: найти самый свежий .pt в code/ml/data/
+        # auto: найти самый свежий .pt в code_app/ml/data/
         search_dir = os.path.join(_HERE, "..", "ml", "data")
         candidates = []
         for root, _, files in os.walk(search_dir):
@@ -87,7 +87,7 @@ def _resolve_model(arg: str) -> str | None:
                     p = os.path.join(root, f)
                     candidates.append((os.path.getmtime(p), p))
         if not candidates:
-            print("  [ПРЕДУПРЕЖДЕНИЕ] Файлы .pt не найдены в code/ml/data/. Запуск без NN.")
+            print("  [ПРЕДУПРЕЖДЕНИЕ] Файлы .pt не найдены в code_app/ml/data/. Запуск без NN.")
             return None
         candidates.sort(reverse=True)
         found = candidates[0][1]
@@ -101,32 +101,28 @@ def _resolve_model(arg: str) -> str | None:
     return None
 
 
-def _load_speed_fn(model_path: str, vstar_cap: float | None = None):
-    """Загрузить SpeedPredictor и вернуть speed_fn для SimConfig.
+def _load_speed_fn(model_path: str):
+    """Загрузить SpeedPredictor и вернуть (speed_fn, drone) для SimConfig.
 
-    vstar_cap — жёсткий верхний предел для raw-предсказания NN.
-    Для эллиптической спирали рекомендуется vstar_cap=0.9 (граница ~1.0).
-    Возвращает (speed_fn, drone) или (None, QuadModel()) при ошибке.
+    Верхняя граница V* берётся из drone.max_speed (сохранена в чекпоинте).
+    Возвращает (None, QuadModel()) при ошибке импорта.
     """
     try:
-        from ml.inference.predict import SpeedPredictor
+        from ml.models.registry import SpeedPredictorAny
         from ml.dataset.features import feature_vector
     except ImportError as e:
         print(f"  [ПРЕДУПРЕЖДЕНИЕ] Не удалось импортировать ML-модуль: {e}")
         print("  Установите зависимости: pip install torch")
         return None, QuadModel()
 
-    predictor = SpeedPredictor.load(model_path)
+    predictor = SpeedPredictorAny.load(model_path)
     drone = predictor.drone
 
-    curve_ref = _make_curve()   # Кривая нужна внутри замыкания.
+    curve_ref = _make_curve()
 
     def speed_fn(state: np.ndarray, s: float) -> float:
         feat = feature_vector(state, curve_ref, drone=drone, s=s)
-        v = predictor.predict(feat)
-        if vstar_cap is not None:
-            v = min(v, vstar_cap)
-        return v
+        return predictor.predict(feat)
 
     return speed_fn, drone
 
@@ -140,7 +136,6 @@ def run(
     Vstar: float = 1.0,
     T: float = 40.0,
     model_path: str | None = None,
-    vstar_cap: float | None = None,
 ) -> None:
     """Запустить симуляцию дрона вдоль эллиптической спирали.
 
@@ -155,12 +150,11 @@ def run(
     curve = _make_curve()
     x0 = _make_x0()
 
-    # Определить speed_fn и drone.
     speed_fn = None
     drone = QuadModel()
 
     if model_path is not None:
-        speed_fn, drone = _load_speed_fn(model_path, vstar_cap=vstar_cap)
+        speed_fn, drone = _load_speed_fn(model_path)
         if speed_fn is None:
             print("  Продолжаю без NN.")
 
@@ -184,8 +178,6 @@ def run(
         print(f"  Модель : {model_path}")
         print(f"  Дрон   : V* ∈ [{drone.min_speed}, {drone.max_speed}]  "
               f"lateral_e_lim = {drone.lateral_error_limit}")
-        if vstar_cap is not None:
-            print(f"  NN cap : V* ≤ {vstar_cap}")
 
     result = simulate_path_following(curve, cfg)
     result.print_summary()
@@ -207,7 +199,7 @@ def main() -> None:
         metavar="PATH|auto|default|none",
         help=(
             "Нейросетевой оптимизатор V*: путь к .pt файлу, "
-            "'auto' (последний в code/ml/data/), "
+            "'auto' (последний в code_app/ml/data/), "
             "'default' (стандартный путь проекта), "
             "'none' (не использовать NN)"
         ),
@@ -224,15 +216,6 @@ def main() -> None:
         "--T", type=float, default=40.0,
         help="Время симуляции, сек",
     )
-    parser.add_argument(
-        "--vstar-cap", type=float, default=None,
-        metavar="CAP",
-        help=(
-            "Верхний предел V* для NN-предсказания. "
-            "Эллиптическая спираль устойчива до V*≈1.0 → рекомендуется 0.9. "
-            "Без ограничения NN может выдать V*>1.0 и дрон уйдёт в расходимость."
-        ),
-    )
     args = parser.parse_args()
 
     model_path = _resolve_model(args.model)
@@ -242,7 +225,6 @@ def main() -> None:
         Vstar=args.vstar,
         T=args.T,
         model_path=model_path,
-        vstar_cap=args.vstar_cap,
     )
 
 

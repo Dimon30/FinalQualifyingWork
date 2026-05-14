@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, Callable
+from typing import Callable
 
 from drone_sim import make_curve
 from drone_sim.geometry.curves import (
@@ -35,7 +35,6 @@ class TestScenario:
         curve       — геометрия кривой CurveGeom
         x0          — начальный вектор состояния [16]
         cfg_kw      — словарь параметров SimConfig (кроме Vstar/speed_fn/quad_model)
-        vstar_cap   — максимальное V*, выдаваемое NN (None = без ограничения)
         warmup_time — время прогрева в секундах (NN неактивна)
         vstar_rate  — максимальный темп изменения V* [1/с]
     """
@@ -44,7 +43,6 @@ class TestScenario:
     curve: CurveGeom
     x0: np.ndarray
     cfg_kw: dict
-    vstar_cap: Optional[float] = None
     warmup_time: float = 5.0
     vstar_rate: float = 0.3
 
@@ -70,7 +68,6 @@ def get_test_suite() -> list[TestScenario]:
             T=40.0, dt=0.002, kappa=200.0,
             gamma=(1., 3., 5., 3., 1.), gamma_nearest=1.0, zeta0=0.0,
         ),
-        vstar_cap=3.5,
         warmup_time=5.0,
         vstar_rate=0.3,
     )
@@ -87,7 +84,6 @@ def get_test_suite() -> list[TestScenario]:
             T=40.0, dt=0.002, kappa=200.0,
             gamma=(1., 3., 5., 3., 1.), gamma_nearest=1.0, zeta0=0.0,
         ),
-        vstar_cap=3.5,
         warmup_time=5.0,
         vstar_rate=0.3,
     )
@@ -104,7 +100,6 @@ def get_test_suite() -> list[TestScenario]:
             T=40.0, dt=0.002, kappa=200.0,
             gamma=(1., 3., 5., 3., 1.), gamma_nearest=3.0, zeta0=0.0,
         ),
-        vstar_cap=4.0,
         warmup_time=5.0,
         vstar_rate=0.3,
     )
@@ -122,7 +117,6 @@ def get_test_suite() -> list[TestScenario]:
             gamma=(1., 3., 5., 3., 1.), gamma_nearest=1.0, zeta0=0.0,
             nearest_fn=nearest_point_line,
         ),
-        vstar_cap=None,
         warmup_time=3.0,
         vstar_rate=0.5,
     )

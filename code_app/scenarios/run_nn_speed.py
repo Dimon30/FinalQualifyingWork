@@ -5,11 +5,11 @@
 Для запуска одной симуляции с NN используйте run_test_drone.py.
 
 Запуск (из корня проекта):
-    python code/scenarios/run_nn_speed.py
-    python code/scenarios/run_nn_speed.py --curve spiral
-    python code/scenarios/run_nn_speed.py --curve line --Vstar 1.0
-    python code/scenarios/run_nn_speed.py --model code/ml/data/saved_models/speed_model.pt
-    python code/scenarios/run_nn_speed.py --out code/out_images/compare_spiral
+    python code_app/scenarios/run_nn_speed.py
+    python code_app/scenarios/run_nn_speed.py --curve spiral
+    python code_app/scenarios/run_nn_speed.py --curve line --Vstar 1.0
+    python code_app/scenarios/run_nn_speed.py --model code_app/ml/data/saved_models/speed_model.pt
+    python code_app/scenarios/run_nn_speed.py --out code_app/out_images/compare_spiral
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from drone_sim.visualization.plotting import ensure_out, display_path
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(__file__)
 _DEFAULT_MODEL = os.path.join(_HERE, "..", "ml", "data", "saved_models", "speed_model.pt")
-_DEFAULT_OUT = "code/out_images/nn_speed"
+_DEFAULT_OUT = "code_app/out_images/nn_speed"
 
 
 # ---------------------------------------------------------------------------
@@ -75,11 +75,11 @@ def _make_scenario(name: str) -> tuple[CurveGeom, dict, str]:
 # Загрузка NN модели
 # ---------------------------------------------------------------------------
 
-def _load_speed_fn(model_path: str, curve: CurveGeom, vstar_cap: float | None = None):
+def _load_speed_fn(model_path: str, curve: CurveGeom):
     """Загрузить предиктор и вернуть (speed_fn, drone).
 
     Поддерживает все типы моделей: mlp, sac, td3, ppo.
-    vstar_cap — жёсткий верхний предел V* (None = без ограничения).
+    Верхняя граница V* берётся из drone.max_speed (сохранена в чекпоинте).
     """
     from ml.models.registry import SpeedPredictorAny
     from ml.dataset.features import feature_vector
@@ -89,10 +89,7 @@ def _load_speed_fn(model_path: str, curve: CurveGeom, vstar_cap: float | None = 
 
     def speed_fn(state: np.ndarray, s: float) -> float:
         feat = feature_vector(state, curve, drone=drone, s=s)
-        v = predictor.predict(feat)
-        if vstar_cap is not None:
-            v = min(v, vstar_cap)
-        return v
+        return predictor.predict(feat)
 
     return speed_fn, drone, predictor
 
@@ -236,16 +233,12 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--model", default="auto",
-                        help="Путь к .pt модели или 'auto' (найти в code/ml/data/)")
+                        help="Путь к .pt модели или 'auto' (найти в code_app/ml/data/)")
     parser.add_argument("--curve", default="spiral",
                         choices=["spiral", "line", "circle"],
                         help="Кривая для сравнения")
     parser.add_argument("--Vstar", type=float, default=1.0,
                         help="Базовая V* для константного режима")
-    parser.add_argument("--vstar-cap", type=float, default=None,
-                        metavar="CAP",
-                        help="Верхний предел для NN-предсказания V* (None = без ограничения). "
-                             "Для spiral рекомендуется 3.5 (граница устойчивости ~4.0).")
     parser.add_argument("--warmup", type=float, default=5.0,
                         metavar="SEC",
                         help="Время прогрева [с]: NN не активна, используется константная V*")
@@ -267,8 +260,8 @@ def main() -> None:
                     p = os.path.join(root, f)
                     candidates.append((os.path.getmtime(p), p))
         if not candidates:
-            print("  [ОШИБКА] Файлы .pt не найдены в code/ml/data/.")
-            print("  Сначала запустите обучение: python code/scenarios/train_speed_model.py")
+            print("  [ОШИБКА] Файлы .pt не найдены в code_app/ml/data/.")
+            print("  Сначала запустите обучение: python code_app/scenarios/train_speed_model.py")
             sys.exit(1)
         candidates.sort(reverse=True)
         model_path = candidates[0][1]
@@ -281,15 +274,12 @@ def main() -> None:
     curve, cfg_kw, curve_label = _make_scenario(args.curve)
 
     # Загрузить NN.
-    speed_fn, drone, predictor = _load_speed_fn(model_path, curve,
-                                                 vstar_cap=args.vstar_cap)
+    speed_fn, drone, predictor = _load_speed_fn(model_path, curve)
     print(f"\nМодель  : {predictor}")
     print(f"Кривая  : {curve_label}")
     print(f"Дрон    : V* ∈ [{drone.min_speed}, {drone.max_speed}]  "
           f"lateral_e_lim={drone.lateral_error_limit}")
     print(f"Baseline: Vstar={args.Vstar}")
-    if args.vstar_cap is not None:
-        print(f"NN cap  : V*_nn ≤ {args.vstar_cap}")
     print(f"Warmup  : {args.warmup} с   rate: {args.vstar_rate} V*/с\n")
 
     # Baseline.

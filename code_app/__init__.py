@@ -1,2 +1,2 @@
-# Makes code/ a Python package so pytest can import code/conftest.py
-# without conflicting with the stdlib code module.
+# Makes code_app/ a Python package so pytest can import code_app/conftest.py
+# without conflicting with the stdlib code_app module.

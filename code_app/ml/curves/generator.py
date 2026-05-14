@@ -184,7 +184,7 @@ def generate_curve(
         # Безопасное условие: k ≤ 0.9 × r  (beta < 42°, 10%-запас от предела 45°).
         # r ≥ 1.0 гарантирует ||t|| = sqrt(r²+k²) ≥ r ≥ 1.0 при любом k ≥ 0.
         r = float(rng.uniform(1.0, 3.0))
-        k_max = 0.9 * r   # beta < 42°
+        k_max = 0.6 * r   # beta < 31° (был 42°) — безопасный запас от физ. предела 45°
         k_min = 0.1       # минимальный подъём, чтобы спираль не была плоской
         k = float(rng.uniform(k_min, k_max))
         return make_spiral_curve(r, k)
@@ -197,7 +197,7 @@ def generate_curve(
 def generate_dataset_curves(
     n: int = 200,
     seed: int = 42,
-    type_weights: Tuple[float, float, float] = (0.1, 0.4, 0.5),
+    type_weights: Tuple[float, float, float] = (0.2, 0.35, 0.45),
 ) -> List[CurveSpec]:
     """Сгенерировать список из n допустимых кривых для датасета.
 

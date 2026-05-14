@@ -3,17 +3,17 @@
 Использование (из корня проекта)::
 
     # Автопоиск последней модели по кодовому имени:
-    python code/scenarios/run_compare_models.py --model sac --curve spiral
-    python code/scenarios/run_compare_models.py --model td3 --curve line
-    python code/scenarios/run_compare_models.py --model ppo --curve circle
+    python code_app/scenarios/run_compare_models.py --model sac --curve spiral
+    python code_app/scenarios/run_compare_models.py --model td3 --curve line
+    python code_app/scenarios/run_compare_models.py --model ppo --curve circle
 
     # Явный путь к .pt файлу:
-    python code/scenarios/run_compare_models.py \\
-        --model code/ml/data/saved_models/sac_model.pt --curve spiral
+    python code_app/scenarios/run_compare_models.py \\
+        --model code_app/ml/data/saved_models/sac_model.pt --curve spiral
 
     # Дополнительные параметры:
-    python code/scenarios/run_compare_models.py --model sac --curve spiral \\
-        --Vstar 1.0 --vstar-cap 3.5 --vstar-rate 0.3 --warmup 5.0
+    python code_app/scenarios/run_compare_models.py --model sac --curve spiral \\
+        --Vstar 1.0 --vstar-rate 0.3 --warmup 5.0
 
 Кодовые имена моделей:
     mlp  — SpeedMLP        (supervised MSE)
@@ -48,7 +48,7 @@ from ml.models.registry import SpeedPredictorAny, MODEL_NAMES
 # ---------------------------------------------------------------------------
 _HERE = os.path.dirname(__file__)
 _MODELS_DIR = os.path.join(_HERE, "..", "ml", "data", "saved_models")
-_DEFAULT_OUT = "code/out_images/compare_rl"
+_DEFAULT_OUT = "code_app/out_images/compare_rl"
 
 _CODE_NAMES = MODEL_NAMES  # ['mlp', 'sac', 'td3', 'ppo']
 
@@ -86,7 +86,7 @@ def _resolve_model_path(model_arg: str) -> str:
 
     print(f"  [ОШИБКА] Модель '{name}' не найдена.")
     print(f"  Ожидался файл: {os.path.join(_MODELS_DIR, name + '_model.pt')}")
-    print(f"  Сначала обучите: python code/scenarios/train_rl_model.py --model {name}")
+    print(f"  Сначала обучите: python code_app/scenarios/train_rl_model.py --model {name}")
     sys.exit(1)
 
 
@@ -127,9 +127,11 @@ def _make_scenario(name: str) -> tuple[CurveGeom, dict, str]:
 def _load_speed_fn(
     model_path: str,
     curve: CurveGeom,
-    vstar_cap: float | None = None,
 ):
-    """Загрузить SpeedPredictorAny и вернуть (speed_fn, drone, predictor)."""
+    """Загрузить SpeedPredictorAny и вернуть (speed_fn, drone, predictor).
+
+    Верхняя граница V* берётся из drone.max_speed (сохранена в чекпоинте).
+    """
     from ml.dataset.features import feature_vector
 
     predictor = SpeedPredictorAny.load(model_path)
@@ -137,10 +139,7 @@ def _load_speed_fn(
 
     def speed_fn(state: np.ndarray, s: float) -> float:
         feat = feature_vector(state, curve, drone=drone, s=s)
-        v = predictor.predict(feat)
-        if vstar_cap is not None:
-            v = min(v, vstar_cap)
-        return v
+        return predictor.predict(feat)
 
     return speed_fn, drone, predictor
 
@@ -328,11 +327,6 @@ def main() -> None:
         help="Базовая V* для константного режима",
     )
     parser.add_argument(
-        "--vstar-cap", type=float, default=None, metavar="CAP",
-        help="Верхний предел NN-предсказания V* (None = без ограничения). "
-             "Для spiral рекомендуется 3.5.",
-    )
-    parser.add_argument(
         "--warmup", type=float, default=5.0, metavar="SEC",
         help="Время прогрева [с]: NN неактивна, используется константная V*",
     )
@@ -354,9 +348,7 @@ def main() -> None:
     ensure_out(args.out)
     curve, cfg_kw, curve_label = _make_scenario(args.curve)
 
-    speed_fn, drone, predictor = _load_speed_fn(
-        model_path, curve, vstar_cap=args.vstar_cap
-    )
+    speed_fn, drone, predictor = _load_speed_fn(model_path, curve)
     model_type = predictor.model_type
 
     print(f"\nМодель    : {predictor}")
@@ -364,8 +356,6 @@ def main() -> None:
     print(f"Дрон      : V* ∈ [{drone.min_speed}, {drone.max_speed}]  "
           f"lateral_e_lim={drone.lateral_error_limit}")
     print(f"Baseline  : Vstar={args.Vstar}")
-    if args.vstar_cap is not None:
-        print(f"NN cap    : V*_nn <= {args.vstar_cap}")
     print(f"Warmup    : {args.warmup} с   rate: {args.vstar_rate} V*/с\n")
 
     print("--- Baseline (константная V*) ---")

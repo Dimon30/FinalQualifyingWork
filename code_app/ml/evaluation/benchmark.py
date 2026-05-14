@@ -7,10 +7,10 @@
 
     runner = BenchmarkRunner(
         model_paths={
-            "mlp": "code/ml/data/saved_models/speed_model.pt",
-            "sac": "code/ml/data/saved_models/sac_model.pt",
-            "td3": "code/ml/data/saved_models/td3_model.pt",
-            "ppo": "code/ml/data/saved_models/ppo_model.pt",
+            "mlp": "code_app/ml/data/saved_models/speed_model.pt",
+            "sac": "code_app/ml/data/saved_models/sac_model.pt",
+            "td3": "code_app/ml/data/saved_models/td3_model.pt",
+            "ppo": "code_app/ml/data/saved_models/ppo_model.pt",
         }
     )
     results = runner.run(get_test_suite())
@@ -211,16 +211,12 @@ class BenchmarkRunner:
         )
 
     def _make_speed_fn(self, pred: SpeedPredictorAny, sc: TestScenario):
-        """Замыкание: speed_fn(state, s) → V* с опциональным cap."""
+        """Замыкание: speed_fn(state, s) → V* из дрона [min_speed, max_speed]."""
         drone = pred.drone
         curve = sc.curve
-        cap   = sc.vstar_cap
 
         def speed_fn(state: np.ndarray, s: float) -> float:
             feat = feature_vector(state, curve, drone=drone, s=s)
-            v    = pred.predict(feat)
-            if cap is not None:
-                v = min(v, cap)
-            return v
+            return pred.predict(feat)
 
         return speed_fn

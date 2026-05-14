@@ -31,7 +31,7 @@ MODEL_FILE: str = "ml/data/vstar_model.pt"
 
 # Стандартный путь к обученной SpeedMLP (относительно корня проекта).
 # Используется SpeedPredictor.default() для загрузки модели по умолчанию.
-DEFAULT_MODEL_PATH: str = "code/ml/data/saved_models/speed_model.pt"
+DEFAULT_MODEL_PATH: str = "code_app/ml/data/saved_models/speed_model.pt"
 
 
 def auto_rollout_horizon(

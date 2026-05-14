@@ -1,0 +1,361 @@
+﻿\chapter{Экспериментальное исследование и анализ результатов}
+
+\section{Организация вычислительного эксперимента}
+
+Экспериментальная часть работы построена как последовательное сравнение нескольких способов выбора целевой скорости движения вдоль траектории. Сначала анализируется сформированный датасет и проверяется, насколько он покрывает характерные режимы задачи. Затем рассматривается обучение моделей. После этого модели подключаются в замкнутый контур управления и сравниваются как между собой, так и с baseline-режимом, в котором используется постоянная параметрическая скорость.
+
+Во всех сценариях сравнение проводится в одних и тех же условиях моделирования. Это позволяет интерпретировать различия в результатах именно как эффект от выбора модели, а не как следствие случайно измененных параметров эксперимента.
+
+\section{Анализ сформированного датасета}
+
+Перед обучением моделей важно убедиться, что датасет не является случайным набором точек, а действительно отражает внутреннюю логику задачи. В текущей версии проекта датасет содержит 124 примера. Для каждого примера сохранены признаки локального состояния и целевое значение $V_{\mathrm{opt}}$, полученное через процедуру подбора допустимой скорости.
+
+На рисунке~\ref{fig:dataset_overview} приведены диагностические графики по сгенерированному датасету. Они позволяют увидеть распределение целевой скорости, связь между кривизной траектории и допустимым темпом движения, а также общую структуру взаимосвязей между признаками.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/dataset_vopt_kappa}
+        \caption{Связь $V_{\mathrm{opt}}$ и кривизны}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/dataset_features_scatter}
+        \caption{Попарные зависимости признаков}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/dataset_correlations}
+        \caption{Корреляции признаков}
+    \end{subfigure}
+    \caption{Диагностика сгенерированного датасета}
+    \label{fig:dataset_overview}
+\end{figure}
+
+По этим графикам видно, что задача не вырождается в тривиальное правило. Значение допустимой скорости действительно зависит от нескольких факторов сразу. Кривизна заметно влияет на верхнюю границу скорости, но не определяет ее полностью: важны также текущие ошибки, направление движения и динамическое состояние. Именно поэтому выбор модели по одному-двум признакам был бы слишком грубым.
+
+\section{Обучение модели MLP}
+
+Сначала была обучена базовая полносвязная модель MLP. Ее динамика обучения и качество приближения оракульных значений показаны на рисунке~\ref{fig:mlp_training}. Слева приведен график изменения функции потерь, справа -- сопоставление реальных и предсказанных значений допустимой скорости.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/training_loss}
+        \caption{Динамика функции потерь}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/prediction_quality}
+        \caption{Качество аппроксимации $V_{\mathrm{opt}}$}
+    \end{subfigure}
+    \caption{Результаты обучения модели MLP}
+    \label{fig:mlp_training}
+\end{figure}
+
+MLP показывает ожидаемое поведение: ошибка обучения убывает стабильно, без резких колебаний, а итоговая аппроксимация хорошо воспроизводит общий масштаб целевой скорости. При этом уже на этом этапе видно ограничение модели: она склонна к более осторожным прогнозам и хуже передает агрессивные режимы ускорения.
+
+\section{Обучение моделей SAC, TD3 и PPO}
+
+На следующем этапе были обучены три альтернативные архитектуры: SAC, TD3 и PPO. Их кривые обучения и итоговое качество предсказания приведены на рисунке~\ref{fig:rl_training}. Такое представление позволяет сравнить модели не только по финальному результату, но и по характеру самого процесса обучения.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sac_loss}
+        \caption{SAC: обучение}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/td3_loss}
+        \caption{TD3: обучение}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ppo_loss}
+        \caption{PPO: обучение}
+    \end{subfigure}
+
+    \vspace{0.7em}
+
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sac_quality}
+        \caption{SAC: качество прогноза}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/td3_quality}
+        \caption{TD3: качество прогноза}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ppo_quality}
+        \caption{PPO: качество прогноза}
+    \end{subfigure}
+    \caption{Обучение альтернативных моделей выбора скорости}
+    \label{fig:rl_training}
+\end{figure}
+
+По характеру графиков видно, что модели ведут себя по-разному. SAC обучается наиболее ровно и обычно дает стабильные оценки. TD3 быстрее переходит к агрессивным режимам, но чувствительнее к особенностям сценария. PPO демонстрирует наиболее удачный компромисс: он достаточно активно увеличивает скорость, но при этом не теряет управляемость на большинстве тестов.
+
+\section{Работа моделей на базовом сценарии: сравнение с baseline}
+
+Для наглядного сравнения все модели были проверены на одном базовом сценарии -- движении по спирали радиуса $r=3$. На рисунках~\ref{fig:spiral_errors_models}--\ref{fig:spiral_3d_models} показаны графики ошибок, скорости и траекторий для baseline-режима и каждой из обученных моделей.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/mlp_errors}
+        \caption{MLP}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sac_errors}
+        \caption{SAC}
+    \end{subfigure}
+
+    \vspace{0.7em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/td3_errors}
+        \caption{TD3}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ppo_errors}
+        \caption{PPO}
+    \end{subfigure}
+    \caption{Ошибки слежения на сценарии spiral\_r3}
+    \label{fig:spiral_errors_models}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/mlp_velocity}
+        \caption{MLP}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sac_velocity}
+        \caption{SAC}
+    \end{subfigure}
+
+    \vspace{0.7em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/td3_velocity}
+        \caption{TD3}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ppo_velocity}
+        \caption{PPO}
+    \end{subfigure}
+    \caption{Скоростные профили на сценарии spiral\_r3}
+    \label{fig:spiral_velocity_models}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/mlp_3d}
+        \caption{MLP}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sac_3d}
+        \caption{SAC}
+    \end{subfigure}
+
+    \vspace{0.7em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/td3_3d}
+        \caption{TD3}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ppo_3d}
+        \caption{PPO}
+    \end{subfigure}
+    \caption{Пространственные траектории на сценарии spiral\_r3}
+    \label{fig:spiral_3d_models}
+\end{figure}
+
+По этим графикам различия между моделями видны особенно хорошо. MLP ведет себя осторожно: прирост средней скорости есть, но он умеренный. SAC ускоряет движение заметно сильнее и при этом сохраняет малую поперечную ошибку. TD3 и PPO дают самый высокий темп движения, однако TD3 на сложных траекториях оказывается менее надежным. На самом базовом сценарии spiral\_r3 PPO и TD3 показывают почти одинаковую скорость, но дальнейшие бенчмарки демонстрируют, что PPO лучше переносится на другие геометрии.
+
+Дополнительно на рисунке~\ref{fig:spiral_sync_models} приведены графики ошибки синхронизации~--- разности между реально пройденной дугой $s_{\mathrm{arc}}$ и опорным значением $s_{\mathrm{ref}}$. Они показывают, насколько корректно каждая модель поддерживает согласованное продвижение вдоль траектории при адаптивной скорости.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/mlp_sync}
+        \caption{MLP}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/sac_sync}
+        \caption{SAC}
+    \end{subfigure}
+
+    \vspace{0.7em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/td3_sync}
+        \caption{TD3}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/ppo_sync}
+        \caption{PPO}
+    \end{subfigure}
+    \caption{Ошибка синхронизации ($s_{\mathrm{arc}} - s_{\mathrm{ref}}$) на сценарии spiral\_r3}
+    \label{fig:spiral_sync_models}
+\end{figure}
+
+\section{Сравнение моделей на наборе бенчмарков}
+
+После анализа отдельного сценария все модели были протестированы на наборе бенчмарков, включающем спираль, окружность, более сложную винтовую траекторию и пространственную прямую. На рисунке~\ref{fig:benchmark_spiral} показан пример детального сравнения на спирали, а на рисунке~\ref{fig:benchmark_summary} -- итоговые сводные диаграммы по всем сценариям.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/spiral_r3_e2}
+        \caption{Поперечная ошибка}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/spiral_r3_velocity}
+        \caption{Скорость движения}
+    \end{subfigure}
+    \caption{Сравнение моделей на сценарии spiral\_r3}
+    \label{fig:benchmark_spiral}
+\end{figure}
+
+На рисунках~\ref{fig:benchmark_circle}--\ref{fig:benchmark_line} показаны аналогичные сравнения для остальных трёх сценариев, проверяющих, насколько хорошо модели переносятся на другие геометрии траектории.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/circle_r3z5_e2}
+        \caption{Поперечная ошибка}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/circle_r3z5_velocity}
+        \caption{Скорость движения}
+    \end{subfigure}
+    \caption{Сравнение на сценарии circle\_r3z5 (горизонтальная окружность, $r=3$, $z=5$)}
+    \label{fig:benchmark_circle}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/helix_r2_e2}
+        \caption{Поперечная ошибка}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/helix_r2_velocity}
+        \caption{Скорость движения}
+    \end{subfigure}
+    \caption{Сравнение на сценарии helix\_r2 (крутая спираль, $r=2$)}
+    \label{fig:benchmark_helix}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/line_diag_e2}
+        \caption{Поперечная ошибка}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/line_diag_velocity}
+        \caption{Скорость движения}
+    \end{subfigure}
+    \caption{Сравнение на сценарии line\_diag (пространственная прямая)}
+    \label{fig:benchmark_line}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/summary_e2_rms}
+        \caption{$e_{2,\mathrm{RMS}}$}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/summary_v_mean}
+        \caption{Средняя скорость}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.32\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/summary_speedup}
+        \caption{Коэффициент ускорения}
+    \end{subfigure}
+    \caption{Сводное сравнение моделей по всем четырём сценариям бенчмарка}
+    \label{fig:benchmark_summary}
+\end{figure}
+
+Для полноты результата в отчет включена и таблица с численными метриками, автоматически сформированная модулем оценки.
+
+\input{tables/summary_table.tex}
+
+Анализ итоговой таблицы показывает несколько устойчивых закономерностей.
+\begin{enumerate}
+    \item MLP стабильно улучшает baseline по средней скорости, но делает это консервативно. Это хороший безопасный базовый вариант, однако его выигрыш ограничен.
+    \item SAC дает более высокий прирост скорости и при этом остается устойчивым на всех основных сценариях. По совокупности свойств это наиболее ровная и надежная модель.
+    \item TD3 демонстрирует очень высокий темп движения, но на части траекторий цена за это оказывается слишком высокой. На сценарии helix\_r2 и на пространственной прямой появляются признаки расходимости и недопустимого роста ошибки.
+    \item PPO показывает наилучший баланс между ускорением и устойчивостью. В проведенных тестах эта модель обеспечивает высокий прирост средней скорости и при этом сохраняет сходимость на всем наборе основных сценариев.
+\end{enumerate}
+
+\section{Интерпретация результатов}
+
+Полученные результаты подтверждают исходную гипотезу работы: адаптивный выбор параметрической скорости действительно позволяет ускорить прохождение траектории без полной переработки базового контура управления. При этом само качество решения сильно зависит от характера модели.
+
+Если приоритетом является надежность и простота, разумным выбором остается MLP. Если нужен наиболее устойчивый практический компромисс, сильнее выглядит SAC. Если задача состоит в поиске максимального выигрыша по скорости при приемлемом риске, то наиболее интересным кандидатом становится PPO. TD3 в текущей конфигурации можно рассматривать скорее как показатель верхней границы по агрессивности, чем как универсальное итоговое решение.
+
+\section{Выводы по главе}
+
+В третьей главе был проведен полный цикл экспериментального анализа: от диагностики датасета и графиков обучения до сравнения моделей в замкнутом контуре управления. Эксперименты показали, что все исследуемые модели способны повысить среднюю скорость движения по сравнению с baseline-режимом, однако делают это по-разному. Наиболее сбалансированный результат в текущей версии системы демонстрирует PPO, тогда как SAC показывает наилучшую общую устойчивость, а MLP остается самым консервативным и интерпретируемым вариантом.

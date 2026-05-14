@@ -258,8 +258,10 @@ class PathFollowingController:
         self._model = quad_model if quad_model is not None else QuadModel()
         self._speed_fn = speed_fn          # None → постоянная скорость (fallback)
         self._prev_V: float = float(Vstar) # предыдущий V_ref для ограничения ускорения
+        self._Vstar_base: float = float(Vstar)  # baseline (безопасный) уровень скорости
         self._warmup_time: float = float(warmup_time)    # пока t < warmup_time — NN не вызывается
         self._vstar_max_rate: float = 0.3               # переопределяется через SimConfig
+        self._cooldown_steps: int = 0    # шаги восстановления после аварии (Level 3)
 
         self._nearest = NearestPointObserver(
             curve=curve,
@@ -324,23 +326,72 @@ class PathFollowingController:
                 V_nn = float(self._speed_fn(x, s))
                 if not np.isfinite(V_nn):
                     V_nn = self._prev_V
-                # Защита от eta-windup по s_arc: дрон не успевает → запретить рост V*.
-                # Используем lam1[0] = s_arc - s_ref (реальная ошибка дуги).
-                sarc_err = self._s_arc - self._s_ref
-                if sarc_err < -0.3:
-                    V_nn = min(V_nn, self._prev_V)
-                # Защита от eta-windup по |e2|
+
+                # --- Диагностические величины ---
                 _, _, e2_curr = se_from_pose(p_xyz, s, self.curve)
-                if abs(e2_curr) > self._model.lateral_error_limit * 0.5:
-                    V_nn = min(V_nn, self._prev_V)
-                # Защита от высокой физической скорости → принудительно снизить V*
-                v_norm_curr = float(np.linalg.norm(x[3:6]))
-                if v_norm_curr > self._model.max_velocity_norm * 0.8:
+                e2_ratio = abs(e2_curr) / max(self._model.lateral_error_limit, 1e-9)
+                # Рассогласование дуг: s_arc (∫||t||dζ) и s_ref (∫V*dt) — обе в метрах.
+                # В равновесии s_arc ≈ s_ref. Отрицательное → дрон отстаёт.
+                sarc_err = self._s_arc - self._s_ref
+
+                # --- Четырёхуровневая защита ---
+
+                # Уровень 0: физический предел на основе геометрии кривой.
+                # В установившемся режиме: v_body ≈ V* (arc-speed), ζ̇ = V*/||t(ζ)||.
+                # Ограничиваем V* так, чтобы ζ̇ ≤ max_speed/||t||²:
+                #   max_safe_vstar = max_speed / ||t|| × 1.1
+                # Для спирали r=3 (||t||=√10, max_speed=10): cap ≈ 3.47 ≈ vstar_cap=3.5 ✓
+                # Для helix r=2 (||t||=3): cap ≈ 3.67 (безопаснее прежнего cap=4.0 ✓)
+                # Для прямой (||t||=√3): cap ≈ 6.35 (без ограничения, ≡ cap=None ✓)
+                # Использует max_speed (=10 для всех моделей), НЕ max_velocity_norm
+                # (max_velocity_norm у RL-моделей=6.0 из обучения, что дало бы cap=2.09).
+                t_norm_curr = float(np.linalg.norm(self.curve.t(s)))
+                max_safe_vstar = self._model.max_speed / max(t_norm_curr, 1e-3) * 1.1
+                V_nn = min(V_nn, max_safe_vstar)
+
+                # Уровень 1: значительное отставание дуги → вернуть к baseline.
+                # Дрон физически не может держать скорость. Порог 1.5 м выбран так:
+                # при rate=0.3 м/с², переходный процесс даёт дефицит ~0.3-0.4 м (не срабатывает).
+                # При настоящей нестабильности дефицит растёт до >1 м и быстро нарастает.
+                if sarc_err < -1.5:
+                    V_nn = min(V_nn, self._Vstar_base)
+
+                # Уровень 2: умеренная поперечная ошибка → прижать к baseline
+                if e2_ratio > 0.4:
+                    V_nn = min(V_nn, self._Vstar_base)
+
+                # Уровень 3: аварийный (только по e2) — сброс η-интегратора + cooldown.
+                # η-windup: при нестабильном V* η накапливает большой U.
+                # Cooldown: запрещает NN увеличивать V* выше baseline в течение
+                # нескольких секунд после аварии — даёт системе восстановиться.
+                # ВАЖНО: наблюдатель obs НЕ сбрасывается — сброс sigma вызывает взрыв.
+                # ВАЖНО: emergency гейтируется cooldown_steps == 0, чтобы НЕ перезапускаться
+                # каждый шаг во время cooldown (повторный взрыв V*=min при временных ошибках).
+                emergency = False
+                if e2_ratio > 0.7 and self._cooldown_steps == 0:
                     V_nn = self._model.min_speed
-                # Ограничение темпа изменения V*: не более vstar_max_rate за секунду.
-                max_dv = self._vstar_max_rate * dt
-                V_ref = self._prev_V + float(np.clip(V_nn - self._prev_V, -max_dv, max_dv))
-                V_ref = float(np.clip(V_ref, self._model.min_speed, self._model.max_speed))
+                    emergency = True
+                    self._eta[:] = 0.0          # сброс η-интегратора
+                    self._cooldown_steps = 2500  # ≈5 с при dt=0.002 (период восстановления)
+
+                # Cooldown: не позволяем NN выйти выше baseline пока система восстанавливается
+                if not emergency and self._cooldown_steps > 0:
+                    V_nn = min(V_nn, self._Vstar_base)
+                    self._cooldown_steps -= 1
+
+                # --- Rate limiter ---
+                # Рост: ограничен (не более vstar_max_rate в секунду).
+                # Снижение: в 20× быстрее — быстрая реакция на ухудшение.
+                # Аварийное снижение: мгновенное (bypass).
+                if emergency:
+                    V_ref = float(np.clip(V_nn, self._model.min_speed, max_safe_vstar))
+                else:
+                    max_dv_up = self._vstar_max_rate * dt
+                    max_dv_dn = self._vstar_max_rate * dt * 20.0
+                    delta = V_nn - self._prev_V
+                    delta = min(delta, max_dv_up) if delta > 0 else max(delta, -max_dv_dn)
+                    V_ref = float(np.clip(self._prev_V + delta, self._model.min_speed, max_safe_vstar))
+
                 self.Vstar = V_ref
                 self._prev_V = V_ref
             except Exception as _exc:

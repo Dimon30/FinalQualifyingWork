@@ -21,10 +21,13 @@ htmlcov/
 .claude/
 
 out/
-code/out_images/
+out_practice/
+#code_app/out_images/
+code_app/out_images_legacy/
 legacy/
 auxil/
-code/ml/data/
+auxil_practice/
+code_app/ml/data/
 
 *.log
 *.tmp
@@ -38,4 +41,6 @@ Thumbs.db
 algo.py
 dataset.py
 CLAUDE.md
-
+TEST_REPORT.md
+DEMO_GUIDE_RU.md
+практика

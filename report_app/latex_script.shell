@@ -1,4 +1,6 @@
-xelatex -file-line-error -interaction=nonstopmode -synctex=1 -output-directory=/Users/ml-coder/Study/ITMO/FinalQualifyingWork/out -interaction=batchmode -synctex=0 report.tex
-biber report
-xelatex -file-line-error -interaction=nonstopmode -synctex=1 -output-directory=/Users/ml-coder/Study/ITMO/FinalQualifyingWork/out -interaction=batchmode -synctex=0 report.tex
-xelatex -file-line-error -interaction=nonstopmode -synctex=1 -output-directory=/Users/ml-coder/Study/ITMO/FinalQualifyingWork/out -interaction=batchmode -synctex=0 report.tex
+OUT=/Users/ml-coder/Study/ITMO/FinalQualifyingWork/out
+
+xelatex -file-line-error -interaction=nonstopmode -synctex=1 -output-directory=$OUT report.tex
+biber --input-directory $OUT --output-directory $OUT report
+xelatex -file-line-error -interaction=nonstopmode -synctex=1 -output-directory=$OUT report.tex
+xelatex -file-line-error -interaction=nonstopmode -synctex=1 -output-directory=$OUT report.tex

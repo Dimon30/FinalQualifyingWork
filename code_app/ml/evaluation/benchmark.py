@@ -1,20 +1,4 @@
-"""BenchmarkRunner — запуск всех моделей на фиксированном наборе кривых.
-
-Использование::
-
-    from ml.evaluation.test_suite import get_test_suite
-    from ml.evaluation.benchmark import BenchmarkRunner
-
-    runner = BenchmarkRunner(
-        model_paths={
-            "mlp": "code_app/ml/data/saved_models/speed_model.pt",
-            "sac": "code_app/ml/data/saved_models/sac_model.pt",
-            "td3": "code_app/ml/data/saved_models/td3_model.pt",
-            "ppo": "code_app/ml/data/saved_models/ppo_model.pt",
-        }
-    )
-    results = runner.run(get_test_suite())
-"""
+"""BenchmarkRunner — запуск всех моделей на фиксированном наборе кривых."""
 from __future__ import annotations
 
 import warnings
@@ -30,28 +14,9 @@ from ml.models.registry import SpeedPredictorAny
 from ml.dataset.features import feature_vector
 
 
-# ---------------------------------------------------------------------------
-# Результат одного прогона (модель × кривая)
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ModelResult:
-    """Метрики одного прогона симуляции.
-
-    Атрибуты:
-        model_name    — 'baseline', 'mlp', 'sac', 'td3', 'ppo'
-        scenario_name — имя сценария (например 'spiral_r3')
-        e1_rms        — RMS тангенциальной ошибки [м]
-        e2_rms        — RMS поперечной ошибки [м]
-        e2_max        — максимальная |e2| [м]
-        v_mean        — средняя скорость [м/с]
-        v_final       — финальная скорость [м/с]
-        speedup       — v_mean / baseline_v_mean (заполняется после baseline)
-        converged     — True если e2_rms < CONVERGE_THRESH
-        t             — массив времени [n]
-        errors        — [n×4]: [s_arc-s_ref, e1, e2, delta_phi]
-        velocity      — [n]: ||v||
-    """
+    """Метрики одного прогона (модель × кривая)."""
     model_name: str
     scenario_name: str
     e1_rms: float
@@ -69,19 +34,8 @@ class ModelResult:
 CONVERGE_THRESH = 0.1   # м — порог сходимости e2_rms
 
 
-# ---------------------------------------------------------------------------
-# BenchmarkRunner
-# ---------------------------------------------------------------------------
-
 class BenchmarkRunner:
-    """Запускает все модели на всех тестовых сценариях и собирает метрики.
-
-    Параметры:
-        model_paths — словарь {кодовое_имя → путь_к_.pt}.
-                      Если модель не найдена/не загружается — пропускается.
-        Vstar_base  — базовая V* для режима «baseline» (константная скорость).
-        verbose     — печатать прогресс.
-    """
+    """Запускает все модели на всех тестовых сценариях и собирает метрики."""
 
     def __init__(
         self,
@@ -93,7 +47,7 @@ class BenchmarkRunner:
         self._Vstar_base = float(Vstar_base)
         self._verbose = verbose
 
-        # Загружаем предикторы (пропускаем битые/отсутствующие)
+        # Загружаем предикторы, пропуская битые/отсутствующие
         self._predictors: dict[str, SpeedPredictorAny] = {}
         for name, path in model_paths.items():
             try:
@@ -108,22 +62,8 @@ class BenchmarkRunner:
                     stacklevel=2,
                 )
 
-    # ------------------------------------------------------------------
-    # Публичный метод
-    # ------------------------------------------------------------------
-
-    def run(
-        self,
-        suite: list[TestScenario],
-    ) -> list[ModelResult]:
-        """Запустить бенчмарк по всем сценариям.
-
-        Для каждого сценария:
-          1. Прогон baseline (константная V*)
-          2. Прогон каждой загруженной модели (адаптивная V*)
-
-        Возвращает список ModelResult (один объект на прогон).
-        """
+    def run(self, suite: list[TestScenario]) -> list[ModelResult]:
+        """По каждому сценарию: baseline + все загруженные модели. Возвращает список ModelResult."""
         all_results: list[ModelResult] = []
 
         for sc in suite:
@@ -132,23 +72,16 @@ class BenchmarkRunner:
                 print(f"Сценарий: {sc.name}  ({sc.label})")
                 print(f"{'='*60}")
 
-            # ---- Baseline ------------------------------------------------
             r_base = self._run_one(sc, model_name="baseline", speed_fn=None)
             all_results.append(r_base)
 
-            # ---- Модели --------------------------------------------------
             for name, pred in self._predictors.items():
                 speed_fn = self._make_speed_fn(pred, sc)
                 r = self._run_one(sc, model_name=name, speed_fn=speed_fn)
-                # speedup относительно baseline
                 r.speedup = r.v_mean / r_base.v_mean if r_base.v_mean > 1e-6 else 1.0
                 all_results.append(r)
 
         return all_results
-
-    # ------------------------------------------------------------------
-    # Внутренние методы
-    # ------------------------------------------------------------------
 
     def _run_one(
         self,
@@ -156,7 +89,6 @@ class BenchmarkRunner:
         model_name: str,
         speed_fn,
     ) -> ModelResult:
-        """Запустить одну симуляцию и вернуть ModelResult."""
         drone = QuadModel()
 
         cfg_kw = dict(sc.cfg_kw)
@@ -203,7 +135,7 @@ class BenchmarkRunner:
             e2_max=e2_max,
             v_mean=v_mean,
             v_final=v_fin,
-            speedup=1.0,       # будет перезаписан для NN-моделей
+            speedup=1.0,
             converged=e2_rms < CONVERGE_THRESH,
             t=t_arr,
             errors=result.errors,
@@ -211,7 +143,7 @@ class BenchmarkRunner:
         )
 
     def _make_speed_fn(self, pred: SpeedPredictorAny, sc: TestScenario):
-        """Замыкание: speed_fn(state, s) → V* из дрона [min_speed, max_speed]."""
+        """Замыкание speed_fn(state, s) → V*."""
         drone = pred.drone
         curve = sc.curve
 

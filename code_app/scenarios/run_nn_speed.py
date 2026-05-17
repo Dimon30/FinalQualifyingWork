@@ -242,9 +242,9 @@ def main() -> None:
     parser.add_argument("--warmup", type=float, default=5.0,
                         metavar="SEC",
                         help="Время прогрева [с]: NN не активна, используется константная V*")
-    parser.add_argument("--vstar-rate", type=float, default=0.5,
+    parser.add_argument("--vstar-rate", type=float, default=0.3,
                         metavar="RATE",
-                        help="Макс. скорость изменения V* [1/с] при NN-управлении")
+                        help="Макс. скорость изменения V* [1/с] при NN-управлении (0.3 = safe)")
     parser.add_argument("--out", default=_DEFAULT_OUT,
                         help="Директория для сравнительных графиков")
     args = parser.parse_args()

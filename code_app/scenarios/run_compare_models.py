@@ -331,8 +331,8 @@ def main() -> None:
         help="Время прогрева [с]: NN неактивна, используется константная V*",
     )
     parser.add_argument(
-        "--vstar-rate", type=float, default=0.5, metavar="RATE",
-        help="Макс. скорость изменения V* [1/с] при NN-управлении",
+        "--vstar-rate", type=float, default=0.3, metavar="RATE",
+        help="Макс. скорость изменения V* [1/с] при NN-управлении (0.3 = рекомендованный safe-режим)",
     )
     parser.add_argument(
         "--out", default=_DEFAULT_OUT,

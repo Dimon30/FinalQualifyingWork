@@ -53,6 +53,11 @@
 \RequirePackage{longtable}
 \RequirePackage{enumitem}
 \RequirePackage{array}
+\captionsetup[table]{
+    labelsep=endash,
+    justification=raggedright,
+    singlelinecheck=false
+}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ВСПОМОГАТЕЛЬНЫЕ ПАКЕТЫ ---
@@ -75,8 +80,13 @@
 
 \titleformat{\chapter}[hang]
   {\normalfont\LARGE\bfseries}
-  {Глава \thechapter.}{0.8em}{}
+  {\thechapter.}{0.8em}{}
 \titlespacing{\chapter}{0pt}{-10pt}{15pt}
+
+\addto\captionsrussian{
+    \renewcommand{\contentsname}{Содержание}
+    \renewcommand{\figurename}{Рисунок}
+}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- КОЛОНТИТУЛЫ ---

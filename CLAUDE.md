@@ -38,14 +38,14 @@ python code_app/scenarios/run_test_drone.py                      # конста�
 python code_app/scenarios/run_test_drone.py --model auto         # NN-оптимизатор (авто)
 
 # ML-пайплайн оптимизации V*:
-python code_app/scenarios/run_build_dataset.py --curves 200 --samples 10 --oracle-horizon 4000
-python code_app/scenarios/train_speed_model.py --epochs 200 --patience 20
+python code_app/scenarios/run_build_dataset.py --curves 200 --samples 12 --oracle-horizon 4000 --oracle-speed-step 0.5 --no-plots
+python code_app/scenarios/train_speed_model.py --epochs 300 --patience 30 --csv code_app/ml/data/dataset_large.csv
 python code_app/scenarios/run_nn_speed.py --curve spiral --vstar-rate 0.3
 
 # RL-архитектуры (offline):
-python code_app/scenarios/train_rl_model.py --model sac --epochs 200 --patience 20
-python code_app/scenarios/train_rl_model.py --model td3 --epochs 400 --patience 40
-python code_app/scenarios/train_rl_model.py --model ppo
+python code_app/scenarios/train_rl_model.py --model sac --epochs 300 --patience 30 --csv code_app/ml/data/dataset_large.csv
+python code_app/scenarios/train_rl_model.py --model td3 --epochs 500 --patience 50 --csv code_app/ml/data/dataset_large.csv
+python code_app/scenarios/train_rl_model.py --model ppo --epochs 300 --csv code_app/ml/data/dataset_large.csv
 
 # Запуск отдельной модели на тестовой кривой:
 python code_app/scenarios/run_compare_models.py --model sac --curve spiral --vstar-rate 0.3
@@ -93,7 +93,7 @@ pip install -r requirements.txt
 ### Структура директорий
 
 ```
-code/
+code_app/
   drone_sim/              — основной Python-пакет
     __init__.py           — публичный API: make_curve, SimConfig, simulate_path_following, …
     models/
@@ -135,7 +135,7 @@ code/
       test_suite.py       — TestScenario, get_test_suite() → 4 фиксированных сценария
       benchmark.py        — BenchmarkRunner, ModelResult
       plots.py            — plot_e2/velocity_comparison, plot_summary_bar, save_latex_table
-    data/                 — dataset.csv, saved_models/*.pt (не коммитить)
+    data/                 — dataset_large.csv (~41k строк), saved_models/*.pt (не коммитить)
   scenarios/
     run_ch4_line.py       — сценарий из диссертации: прямая
     run_ch4_spiral.py     — сценарий из диссертации: спираль r=3
@@ -152,7 +152,7 @@ code/
     test_curves.py        — pytest: 6 кривых, PASS/FAIL по ||[e1,e2]|| < 1.5 м
   conftest.py             — добавляет code/ в sys.path (для запуска pytest из корня)
   pytest.ini              — testpaths = tests, pythonpath = .
-code/out_images/          — сгенерированные графики (не коммитить)
+code_app/out_images/      — сгенерированные графики (не коммитить)
   benchmark/              — результаты run_benchmark.py (e2/velocity по сценариям + summary)
 legacy/                   — архив симуляций Гл. 2–3 (не трогать)
 report/                   — основной LaTeX-отчёт ВКР
@@ -292,22 +292,30 @@ V_star = pred.predict(feature_vector(state, curve, drone=pred.drone, s=zeta))
 
 ### Реализовано (`code/ml/`)
 
-- **4 архитектуры V*-оптимизатора**: MLP, SAC, TD3, PPO — обучены и протестированы ✓
+- **4 архитектуры V*-оптимизатора**: MLP, SAC, TD3, PPO — переобучены на dataset_large.csv (~41k строк) ✓
 - **Единый реестр** `registry.py` + `SpeedPredictorAny` — взаимозаменяемый инференс ✓
 - **Модуль оценки** `ml/evaluation/` — BenchmarkRunner, test_suite, plots ✓
-- **Полный бенчмарк** (4 модели × 4 кривые, 2026-04-21):
+- **Полный бенчмарк** (4 модели × 4 кривые, 2026-05-17 после переобучения на 41k):
 
 | Модель | spiral_r3 | circle_r3z5 | helix_r2 | line_diag |
 |---|---|---|---|---|
-| MLP | 1.34× ✓ | 1.34× ✓ | 1.34× ✓ | 1.31× ✓ |
-| SAC | 2.52× ✓ | 2.54× ✓ | 2.45× ✓ | 2.44× ✓ |
-| TD3 | 2.81× ✓ | 2.81× ✓ | DIVERGED | 2.87× |
-| PPO | 2.81× ✓ | 2.81× ✓ | 3.15× ✓ | 3.38× ✓ |
+| MLP | 0.05 / 1.77× ✓ | 0.01 / 2.39× ✓ | 198 / DIVERGED | 29 / DIVERGED |
+| SAC | 0.17 / 13.7× ✓ | 0.06 / 2.84× ✓ | 0.03 / 2.04× ✓ | DIVERGED |
+| TD3 | 207 / DIVERGED | 0.01 / 2.84× ✓ | 53 / DIVERGED | 1.85× |
+| PPO | 0.02 / 2.95× ✓ | 0.01 / 3.07× ✓ | 75 / DIVERGED | 2.14× |
 
-- **Oracle horizon**: критично использовать `--oracle-horizon 4000` (дефолт слишком короткий).
+Значения: e2_rms (м) / speedup (×). DIVERGED означает e2_rms > 1 м.
+Метрики обучения R²/RMSE/MSE на in-distribution тестовом сете: MLP=0.76 / 0.45 / 0.20, SAC ≈ MLP, TD3 ≈ MLP, PPO ≈ MLP. Расхождение проявляется только на OOD-состояниях в замкнутом контуре (фундаментальное ограничение offline-RL).
+
+- **Oracle horizon**: критично использовать `--oracle-horizon 4000` (20с симуляции); дефолт слишком короткий → ложные unstable-метки.
+- **Oracle warmup**: `simulator_wrapper.py` использует `len//4` (25%=5s для horizon=4000). Совпадает с `warmup_time=5.0` производственного SimConfig.
+- **Oracle кривые**: lines исключены из генерации (`type_weights=[0.0,0.45,0.55]`). Причина: kappa=0 → V_opt=max всегда, нет сигнала; oracle без `nearest_fn` всегда проваливается на произвольных 3D-прямых.
+- **Oracle спирали**: `k_max=0.6*r` в `generator.py` (было 0.9r). Ограничивает β<31° — безопасный запас от физ. предела 45°, oracle при kappa=100 стабилен.
+- **vstar_cap удалён**: верхняя граница V* только из `drone.max_speed` в чекпоинте. `SpeedPredictorAny.predict()` сам клипует в `[min_speed, max_speed]`.
 - **Safety monitor** в `path_sim.py`: NaN-fallback + e2-backoff + sarc-backoff.
 - **s_ref интегратор**: `s_ref = ∫₀ᵗ V*(τ)dτ` (НЕ `V*·t`), обновляется В КОНЦЕ `step()`.
 - **Pre-loop reset**: runner.py вызывает `step()` дважды при t=0; после первого вызова — сброс.
+- **Текущий датасет**: `dataset_large.csv` — 8 процессов × ~5100 строк ≈ **~41,000 строк** (2026-05-16). Параметры: `--curves 1000 --samples 12 --oracle-horizon 4000 --oracle-speed-step 0.5 --seeds 1..8`.
 
 ### Проблемы и ограничения
 
@@ -315,5 +323,7 @@ V_star = pred.predict(feature_vector(state, curve, drone=pred.drone, s=zeta))
 - **Гл. 3 — ошибка ~0.50 м**: наблюдатель не успевает сойтись за T=40с при kappa=100, dt=0.01.
 - **[ИСПРАВЛЕНО] Гл. 4 — формула длины дуги**: инкрементальный интеграл `∫‖t(τ)‖dτ`. Эллипс: e1=0.003, e2=0.001 м ✓
 - **[ИСПРАВЛЕНО] report/report.tex**: был `extrarcticle` → исправлен на `extreport` (14pt + главы).
-- **TD3 нестабилен на helix_r2**: расходится при cap=4.0 (e2=20м). На остальных кривых работает.
+- **TD3 нестабилен на helix_r2**: расходится (e2=20м). На остальных кривых работает. Причина: детерминированный актор без exploration чувствителен к данным при малой кривизне.
 - **PPO offline R²≈−0.98**: коллапс к константе ~5.2 при обучении, но в замкнутом контуре работает за счёт rate-limiter.
+- **[ИСПРАВЛЕНО] Oracle warmup**: был 10% (2s) → стал 25% (5s). Устранены ложные unstable-метки при переходном процессе.
+- **[ИСПРАВЛЕНО] vstar_cap**: внешний cap удалён из 5 файлов. V* ограничена только `drone.max_speed`.

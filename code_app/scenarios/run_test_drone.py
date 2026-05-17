@@ -1,18 +1,11 @@
-"""
-Тестовый запуск дрона вдоль произвольной кривой.
+"""Тестовый запуск дрона вдоль эллиптической спирали p(s) = [4·cos(s), 2·sin(s), 0.5·s].
 
-Кривая: эллиптическая спираль  p(s) = [4·cos(s), 2·sin(s), 0.5·s]
-Параметры: нормализованная модель (mass=1, J=1), V*=1.0, T=40с, dt=0.002
+По умолчанию — константная V*; с --model подключается NN-оптимизатор V*.
 
-По умолчанию — базовая симуляция с константной V*.
-При указании --model — загружается нейросетевой оптимизатор SpeedPredictor,
-который адаптивно выбирает V* на каждом шаге симуляции.
-
-Запуск (из корня проекта):
+Запуск из корня проекта:
     python code_app/scenarios/run_test_drone.py
     python code_app/scenarios/run_test_drone.py --model auto
     python code_app/scenarios/run_test_drone.py --model default
-    python code_app/scenarios/run_test_drone.py --model code_app/ml/data/saved_models/speed_model.pt
     python code_app/scenarios/run_test_drone.py --out code_app/out_images/my_run
 """
 from __future__ import annotations
@@ -21,7 +14,6 @@ import argparse
 import os
 import sys
 
-# Добавить code_app/ в sys.path для импорта drone_sim и ml.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -33,52 +25,35 @@ matplotlib.use("Agg")
 from drone_sim import make_curve, SimConfig, QuadModel, simulate_path_following
 from drone_sim.visualization.plotting import ensure_out, display_path
 
-# ---------------------------------------------------------------------------
-# Пути по умолчанию
-# ---------------------------------------------------------------------------
 _HERE = os.path.dirname(__file__)
 _DEFAULT_OUT = "code_app/out_images/test_drone"
 _DEFAULT_MODEL_PATH = "code_app/ml/data/saved_models/speed_model.pt"
 
-# ---------------------------------------------------------------------------
-# Кривая: эллиптическая спираль
-# Примечание: ||t||² ∈ [4.25, 16.25], поэтому gamma_nearest = 5
-# (условие: gamma < 2 / (||t||²_max * dt) = 2 / (16.25 * 0.002) ≈ 61.5)
-# ---------------------------------------------------------------------------
+
 def _make_curve():
+    """Эллиптическая спираль: ||t||² ∈ [4.25, 16.25], gamma_nearest=5 безопасен при dt=0.002."""
     return make_curve(lambda s: np.array([3.0 * np.cos(s), 3.0 * np.sin(s), 0.5 * s]))
 
 
 def _make_x0() -> np.ndarray:
     x0 = np.zeros(16)
-    x0[0:3] = np.array([4.0, 0.0, 0.0])   # Начальное положение на кривой (s=0).
+    x0[0:3] = np.array([4.0, 0.0, 0.0])
     return x0
 
 
-# ---------------------------------------------------------------------------
-# Вспомогательные функции
-# ---------------------------------------------------------------------------
-
 def _resolve_model(arg: str) -> str | None:
-    """Разрешить аргумент --model в путь к файлу модели.
-
-    Допустимые значения:
-        'none'    — не использовать NN
-        'default' — стандартный путь проекта (code_app/ml/data/saved_models/speed_model.pt)
-        'auto'    — найти последний .pt в code_app/ml/data/
-        иное      — прямой путь к файлу
-    """
+    """Разрешить --model в путь к .pt. Допустимо: none | default | auto | <path>."""
     if arg.lower() == "none":
         return None
 
-    if arg.lower() in ("default", "auto"):
-        if arg.lower() == "default":
-            path = _DEFAULT_MODEL_PATH
-            if os.path.isfile(path):
-                return path
-            print(f"  [ПРЕДУПРЕЖДЕНИЕ] Модель не найдена: {path}")
-            return None
-        # auto: найти самый свежий .pt в code_app/ml/data/
+    if arg.lower() == "default":
+        path = _DEFAULT_MODEL_PATH
+        if os.path.isfile(path):
+            return path
+        print(f"  [ПРЕДУПРЕЖДЕНИЕ] Модель не найдена: {path}")
+        return None
+
+    if arg.lower() == "auto":
         search_dir = os.path.join(_HERE, "..", "ml", "data")
         candidates = []
         for root, _, files in os.walk(search_dir):
@@ -102,11 +77,7 @@ def _resolve_model(arg: str) -> str | None:
 
 
 def _load_speed_fn(model_path: str):
-    """Загрузить SpeedPredictor и вернуть (speed_fn, drone) для SimConfig.
-
-    Верхняя граница V* берётся из drone.max_speed (сохранена в чекпоинте).
-    Возвращает (None, QuadModel()) при ошибке импорта.
-    """
+    """Загрузить SpeedPredictorAny; вернуть (speed_fn, drone). При ошибке — (None, QuadModel())."""
     try:
         from ml.models.registry import SpeedPredictorAny
         from ml.dataset.features import feature_vector
@@ -127,24 +98,13 @@ def _load_speed_fn(model_path: str):
     return speed_fn, drone
 
 
-# ---------------------------------------------------------------------------
-# Основная функция запуска
-# ---------------------------------------------------------------------------
-
 def run(
     out_dir: str = _DEFAULT_OUT,
     Vstar: float = 1.0,
     T: float = 40.0,
     model_path: str | None = None,
 ) -> None:
-    """Запустить симуляцию дрона вдоль эллиптической спирали.
-
-    Параметры:
-        out_dir    — директория для сохранения графиков
-        Vstar      — базовая параметрическая скорость (используется если нет NN)
-        T          — время симуляции, сек
-        model_path — путь к .pt файлу SpeedPredictor; None → без NN
-    """
+    """Симуляция эллиптической спирали; если model_path задан — NN-оптимизатор V*."""
     ensure_out(out_dir)
 
     curve = _make_curve()
@@ -185,10 +145,6 @@ def run(
     print(f"\nГрафики сохранены в: {display_path(out_dir)}")
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Тестовый запуск дрона вдоль эллиптической спирали",
@@ -197,16 +153,11 @@ def main() -> None:
     parser.add_argument(
         "--model", default="none",
         metavar="PATH|auto|default|none",
-        help=(
-            "Нейросетевой оптимизатор V*: путь к .pt файлу, "
-            "'auto' (последний в code_app/ml/data/), "
-            "'default' (стандартный путь проекта), "
-            "'none' (не использовать NN)"
-        ),
+        help="NN-оптимизатор V*: путь к .pt | 'auto' | 'default' | 'none'",
     )
     parser.add_argument(
         "--out", default=_DEFAULT_OUT,
-        help="Директория для сохранения графиков (относительно корня проекта)",
+        help="Директория для графиков",
     )
     parser.add_argument(
         "--vstar", type=float, default=1.0,

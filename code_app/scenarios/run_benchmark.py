@@ -165,10 +165,10 @@ def main() -> None:
         help="Не строить графики (только таблица метрик)",
     )
     parser.add_argument(
-        "--report_app-images", default="",
+        "--report-images", "--report_app-images", dest="report_images", default="",
         metavar="DIR",
         help="Если указано — дополнительно копировать PNG в эту директорию "
-             "(удобно для report_practice/images/)",
+             "(удобно для report_app/images/)",
     )
     args = parser.parse_args()
 

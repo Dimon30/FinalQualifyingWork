@@ -1,45 +1,7 @@
-"""
-path_sim.py
-===========
-Согласованное управление квадрокоптером по произвольной гладкой кривой.
+"""Согласованное управление по выходу для произвольной гладкой кривой (Гл. 4).
 
-Реализует алгоритм Главы 4 диссертации Ким С.А. (2024) в виде удобного API.
-Основная идея: дрон движется вдоль пространственной кривой S с желаемой
-параметрической скоростью V* и нулевыми боковыми ошибками e1, e2.
-
-Математика (уравнения 56-77 диссертации):
-    Регулируемые переменные:
-        lambda_1 = col(s_arc - V*t, e1, e2, delta_phi)
-        s_arc = zeta * ||t(zeta)||  -- длина дуги (точно для ||t|| = const)
-        e1, e2  -- боковые ошибки в системе координат Френе
-        delta_phi = phi - phi*(zeta) -- ошибка рысканья
-
-    Наблюдатель ближайшей точки (обобщение Леммы 3):
-        H(zeta, x) = (p(zeta) - x_drone) . t(zeta)
-        zeta_dot = -gamma * sign(dH/dzeta) * H(zeta, x)
-
-    Закон управления (уравнения 71-72):
-        U_bar = sat_L[ b^{-1} W^{-1} (-sigma - sum_i gamma_i * lambda_hat_i) ]
-        U = gamma5 * eta + U_bar,  eta_dot = U_bar
-
-    Наблюдатель производных 4-го порядка (уравнения 73-77):
-        lambda_hat_dot_1 = lambda_hat_2 + kappa*a1*(lambda_1 - lambda_hat_1)
-        ...
-        sigma_dot = kappa^5 * a5 * (lambda_1 - lambda_hat_1)
-
-Пример использования::
-
-    import numpy as np
-    from drone_sim import make_curve, SimConfig, simulate_path_following
-
-    # Эллиптическая спираль: a=3, b=2, подъём 0.5 рад/м
-    curve = make_curve(lambda s: np.array([3*np.cos(s), 2*np.sin(s), 0.5*s]))
-
-    cfg = SimConfig(Vstar=1.0, T=25.0, dt=0.002, kappa=200)
-    result = simulate_path_following(curve, cfg)
-
-    result.print_summary()
-    result.plot("out_images/elliptic_spiral")
+API: make_curve, SimConfig, simulate_path_following.
+Регулируемые переменные λ̃1 = col(s_arc − s_ref, e1, e2, δφ).
 """
 from __future__ import annotations
 
@@ -70,53 +32,27 @@ __all__ = [
 ]
 
 
-# ===========================================================================
-# 1. Построение геометрии кривой из параметрической функции
-# ===========================================================================
-
 def make_curve(p_fn: Callable[[float], np.ndarray], h: float = 1e-5) -> CurveGeom:
-    """Создать геометрию кривой из параметрической функции p(s).
+    """Построить CurveGeom из параметрической p(s).
 
-    Параметры:
-        p_fn  -- функция p(s) -> np.ndarray[3], задающая кривую S.
-                 Принимает скаляр s (параметр), возвращает точку в R^3.
-                 Примеры:
-                   lambda s: np.array([np.cos(s), np.sin(s), 0.2*s])  # спираль
-                   lambda s: np.array([s, s**2, s])                    # парабола
-        h     -- шаг для численного дифференцирования (по умолчанию 1e-5)
-
-    Возвращает:
-        CurveGeom -- объект геометрии кривой для регулятора и визуализации
-
-    Вычисляемые геометрические характеристики:
-        t(s)       = dp/ds  (касательный вектор, центральная разность)
-        yaw_star(s)= atan2(ty, tx)  (угол рысканья касательной)
-        beta(s)    = atan2(tz, sqrt(tx^2+ty^2))  (угол тангажа касательной)
-        eps(s)     = d(yaw_star)/ds  (кривизна проекции XY)
-
-    Замечание:
-        Функция p_fn должна быть дважды непрерывно дифференцируемой.
-        Разрывы или резкие изломы кривой приведут к ошибочным eps(s).
+    t(s)=dp/ds (центральная разность), yaw_star=atan2(ty,tx), beta=atan2(tz,√(tx²+ty²)),
+    eps=dα/ds. p_fn должна быть дважды дифференцируемой.
     """
     def p(s: float) -> np.ndarray:
         return np.asarray(p_fn(float(s)), dtype=float)
 
     def t(s: float) -> np.ndarray:
-        """Касательный вектор dp/ds (центральная конечная разность)."""
         return (p(s + h) - p(s - h)) / (2.0 * h)
 
     def yaw_star(s: float) -> float:
-        """Угол рысканья касательной alpha(s) = atan2(ty, tx)."""
         tv = t(s)
         return float(np.arctan2(tv[1], tv[0]))
 
     def beta(s: float) -> float:
-        """Угол тангажа касательной beta(s) = atan2(tz, sqrt(tx^2+ty^2))."""
         tv = t(s)
         return float(np.arctan2(tv[2], np.sqrt(tv[0]**2 + tv[1]**2)))
 
     def eps(s: float) -> float:
-        """Кривизна проекции кривой на XY: eps(s) = d(alpha)/ds."""
         a1 = yaw_star(s - h)
         a2 = yaw_star(s + h)
         # Нормализованная разность углов (избегаем 2pi-разрывов)
@@ -126,30 +62,11 @@ def make_curve(p_fn: Callable[[float], np.ndarray], h: float = 1e-5) -> CurveGeo
     return CurveGeom(p=p, t=t, yaw_star=yaw_star, beta=beta, eps=eps)
 
 
-# ===========================================================================
-# 2. Наблюдатель ближайшей точки на произвольной кривой
-# ===========================================================================
-
 class NearestPointObserver:
-    """Динамический наблюдатель ближайшей точки на произвольной кривой.
+    """Динамический наблюдатель ближайшей точки на кривой (обобщение Леммы 3).
 
-    Обобщение Леммы 3 (диссертация, стр. 43) на произвольные кривые.
-
-    Условие ближайшей точки:  H(zeta, x) = (p(zeta) - x) . t(zeta) = 0
-    Закон наблюдателя:  zeta_dot = -gamma * rho * H(zeta, x)
-                        rho = sign(dH/dzeta)
-    dH/dzeta = ||t(zeta)||^2 + (p(zeta) - x) . t'(zeta)
-
-    При numerical_grad=False используется приближение dH/dzeta ~ ||t||^2,
-    что точно вблизи кривой (второй член мал) и даёт rho = +1.
-
-    Параметры:
-        curve          -- геометрия кривой (CurveGeom)
-        gamma          -- коэффициент сходимости (gamma > 0)
-        zeta0          -- начальное значение параметра
-        numerical_grad -- True: точное dH/dzeta (численно)
-                          False: быстрое приближение ~||t||^2
-        h_grad         -- шаг для численного градиента (только при numerical_grad=True)
+    ζ̇ = -γ·sign(dH/dζ)·H, где H(ζ,x) = (p(ζ)-x)·t(ζ).
+    При numerical_grad=False приближение dH/dζ ≈ ||t||² (точно вблизи кривой).
     """
 
     def __init__(
@@ -168,19 +85,10 @@ class NearestPointObserver:
 
     @property
     def zeta(self) -> float:
-        """Текущая оценка параметра ближайшей точки."""
         return self._zeta
 
     def step(self, p_xyz: np.ndarray, dt: float) -> float:
-        """Один шаг интегрирования наблюдателя (явный метод Эйлера).
-
-        Аргументы:
-            p_xyz -- положение дрона [x, y, z]
-            dt    -- шаг времени
-
-        Возвращает:
-            zeta -- обновлённая оценка параметра ближайшей точки
-        """
+        """Один шаг интегрирования (явный Эйлер). Возвращает обновлённый ζ."""
         z = self._zeta
         p_c = self.curve.p(z)
         t_c = self.curve.t(z)
@@ -201,41 +109,14 @@ class NearestPointObserver:
         return self._zeta
 
     def reset(self, zeta0: float = 0.0) -> None:
-        """Сбросить состояние наблюдателя."""
         self._zeta = float(zeta0)
 
 
-# ===========================================================================
-# 3. Контроллер согласованного управления для произвольной кривой
-# ===========================================================================
-
 class PathFollowingController:
-    """Регулятор согласованного управления по выходу для произвольной кривой.
+    """Регулятор Гл. 4 для произвольной кривой (уравнения 71-77).
 
-    Реализует алгоритм Главы 4 (уравнения 71-77 диссертации) в виде,
-    совместимом с любой кривой, созданной через make_curve() или CurveGeom.
-
-    Использует:
-        - NearestPointObserver (по умолчанию) или nearest_fn для ближайшей точки
-        - DerivativeObserver4 для оценки производных вектора ошибок
-        - b_mat, W_mat/W_inv из control/path_following.py
-        - 16-мерную модель квадрокоптера
-
-    Параметры:
-        curve             -- геометрия кривой S
-        Vstar             -- желаемая скорость (параметрическая); начальное значение V_ref
-        params            -- HighGainParams (kappa, a, gamma, L, ell)
-        gamma_nearest     -- коэффициент наблюдателя ближайшей точки (NearestPointObserver)
-        zeta0             -- начальное значение параметра
-        use_numerical_grad -- True: точный gradH для NearestPointObserver
-        nearest_fn        -- опциональная аналитическая функция ближайшей точки:
-                             nearest_fn(p_xyz: np.ndarray) -> float
-                             Если задана — используется вместо NearestPointObserver.
-                             Пример: nearest_fn=nearest_point_line для прямой x=s,y=s,z=s.
-        speed_fn          -- опциональная функция адаптивного выбора скорости:
-                             speed_fn(state: np.ndarray, s: float) -> float
-                             Если None — используется постоянная скорость Vstar (fallback).
-                             Пример: lambda x, s: predictor.predict(feature_vector(x, curve, s=s))
+    Использует NearestPointObserver (или nearest_fn), DerivativeObserver4,
+    W_mat/W_inv/b_mat. Опциональная speed_fn(state, s) → V* для NN-режима.
     """
 
     def __init__(
@@ -272,26 +153,17 @@ class PathFollowingController:
         self._eta = np.zeros(4, dtype=float)
         self.obs = DerivativeObserver4(dim=4, p=params)
 
-        # Накопленная длина дуги: s_arc = ∫₀^ζ ||t(τ)|| dτ
-        # Корректна для любой параметризации (в т.ч. неравномерной эллипс, парабола…).
-        # Вычисляется инкрементально методом средней точки O(dζ²) за шаг.
+        # s_arc = ∫₀^ζ ||t(τ)|| dτ, инкрементально методом средней точки (любая параметризация)
         self._s_arc: float = 0.0
         self._prev_zeta: float = float(zeta0)
 
-        # Ссылочная длина дуги: s_ref = ∫₀ᵗ V*(τ) dτ (интегратор V*).
-        # Используется вместо V*·t — обеспечивает плавность lam1[0] при изменении V*.
-        # При постоянном V*: s_ref(t) = V* · t (точно, обратная совместимость).
+        # s_ref = ∫₀ᵗ V*(τ)dτ — интегратор V*, плавный при изменении V*; для const V*: s_ref = V*·t
         self._s_ref: float = 0.0
 
     def _lambda_tilde_1(
         self, p_xyz: np.ndarray, phi: float, s: float
     ) -> np.ndarray:
-        """Вектор регулируемых переменных lambda_tilde_1.
-
-        lambda_tilde_1 = col(s_arc - s_ref, e1, e2, delta_phi)
-        s_ref = ∫₀ᵗ V*(τ) dτ — ссылочная длина дуги (плавная при изменении V*).
-        При постоянном V*: s_ref = V* · t (обратная совместимость).
-        """
+        """λ̃1 = col(s_arc − s_ref, e1, e2, δφ). s_ref = ∫V*(τ)dτ (плавный при изменении V*)."""
         _, e1, e2 = se_from_pose(p_xyz, s, self.curve)
         phi_star = float(self.curve.yaw_star(s))
         d_phi = float(np.arctan2(np.sin(phi - phi_star), np.cos(phi - phi_star)))
@@ -312,77 +184,51 @@ class PathFollowingController:
         u1_bar = float(x[12])
         u1 = sat_tanh(u1_bar, self.p.L)
 
-        # Шаг 1: ближайшая точка на кривой
+        # Ближайшая точка на кривой
         if self._nearest_fn is not None:
             s = float(self._nearest_fn(p_xyz))
             self._nearest._zeta = s
         else:
             s = self._nearest.step(p_xyz, dt)
 
-        # Адаптивное обновление V_ref (если задан speed_fn)
-        # Fallback: speed_fn is None → self.Vstar остаётся константой
+        # Адаптивное обновление V_ref через speed_fn (после warmup_time)
         if self._speed_fn is not None and t >= self._warmup_time:
             try:
                 V_nn = float(self._speed_fn(x, s))
                 if not np.isfinite(V_nn):
                     V_nn = self._prev_V
 
-                # --- Диагностические величины ---
                 _, _, e2_curr = se_from_pose(p_xyz, s, self.curve)
                 e2_ratio = abs(e2_curr) / max(self._model.lateral_error_limit, 1e-9)
-                # Рассогласование дуг: s_arc (∫||t||dζ) и s_ref (∫V*dt) — обе в метрах.
-                # В равновесии s_arc ≈ s_ref. Отрицательное → дрон отстаёт.
                 sarc_err = self._s_arc - self._s_ref
 
-                # --- Четырёхуровневая защита ---
-
-                # Уровень 0: физический предел на основе геометрии кривой.
-                # В установившемся режиме: v_body ≈ V* (arc-speed), ζ̇ = V*/||t(ζ)||.
-                # Ограничиваем V* так, чтобы ζ̇ ≤ max_speed/||t||²:
-                #   max_safe_vstar = max_speed / ||t|| × 1.1
-                # Для спирали r=3 (||t||=√10, max_speed=10): cap ≈ 3.47 ≈ vstar_cap=3.5 ✓
-                # Для helix r=2 (||t||=3): cap ≈ 3.67 (безопаснее прежнего cap=4.0 ✓)
-                # Для прямой (||t||=√3): cap ≈ 6.35 (без ограничения, ≡ cap=None ✓)
-                # Использует max_speed (=10 для всех моделей), НЕ max_velocity_norm
-                # (max_velocity_norm у RL-моделей=6.0 из обучения, что дало бы cap=2.09).
+                # Уровень 0: cap из геометрии кривой. ζ̇ ≤ max_speed/||t||² → V* ≤ max_speed/||t||·1.1
                 t_norm_curr = float(np.linalg.norm(self.curve.t(s)))
                 max_safe_vstar = self._model.max_speed / max(t_norm_curr, 1e-3) * 1.1
                 V_nn = min(V_nn, max_safe_vstar)
 
-                # Уровень 1: значительное отставание дуги → вернуть к baseline.
-                # Дрон физически не может держать скорость. Порог 1.5 м выбран так:
-                # при rate=0.3 м/с², переходный процесс даёт дефицит ~0.3-0.4 м (не срабатывает).
-                # При настоящей нестабильности дефицит растёт до >1 м и быстро нарастает.
+                # Уровень 1: дефицит дуги > 1.5 м → сброс к baseline
                 if sarc_err < -1.5:
                     V_nn = min(V_nn, self._Vstar_base)
 
-                # Уровень 2: умеренная поперечная ошибка → прижать к baseline
+                # Уровень 2: e2 > 0.4·limit → прижать к baseline
                 if e2_ratio > 0.4:
                     V_nn = min(V_nn, self._Vstar_base)
 
-                # Уровень 3: аварийный (только по e2) — сброс η-интегратора + cooldown.
-                # η-windup: при нестабильном V* η накапливает большой U.
-                # Cooldown: запрещает NN увеличивать V* выше baseline в течение
-                # нескольких секунд после аварии — даёт системе восстановиться.
-                # ВАЖНО: наблюдатель obs НЕ сбрасывается — сброс sigma вызывает взрыв.
-                # ВАЖНО: emergency гейтируется cooldown_steps == 0, чтобы НЕ перезапускаться
-                # каждый шаг во время cooldown (повторный взрыв V*=min при временных ошибках).
+                # Уровень 3: e2 > 0.7·limit — аварийный сброс η + cooldown ~5с.
+                # obs НЕ сбрасываем (сброс sigma вызывает взрыв). Гейтируется cooldown_steps==0.
                 emergency = False
                 if e2_ratio > 0.7 and self._cooldown_steps == 0:
                     V_nn = self._model.min_speed
                     emergency = True
-                    self._eta[:] = 0.0          # сброс η-интегратора
-                    self._cooldown_steps = 2500  # ≈5 с при dt=0.002 (период восстановления)
+                    self._eta[:] = 0.0
+                    self._cooldown_steps = 2500  # ≈5 с при dt=0.002
 
-                # Cooldown: не позволяем NN выйти выше baseline пока система восстанавливается
                 if not emergency and self._cooldown_steps > 0:
                     V_nn = min(V_nn, self._Vstar_base)
                     self._cooldown_steps -= 1
 
-                # --- Rate limiter ---
-                # Рост: ограничен (не более vstar_max_rate в секунду).
-                # Снижение: в 20× быстрее — быстрая реакция на ухудшение.
-                # Аварийное снижение: мгновенное (bypass).
+                # Rate limiter: рост ≤ vstar_max_rate, спуск 20× быстрее, emergency обходит лимит
                 if emergency:
                     V_ref = float(np.clip(V_nn, self._model.min_speed, max_safe_vstar))
                 else:
@@ -398,15 +244,13 @@ class PathFollowingController:
                 import warnings
                 warnings.warn(f"speed_fn exception: {_exc}", RuntimeWarning, stacklevel=2)
 
-        # Обновление накопленной длины дуги: s_arc = ∫₀^ζ ||t(τ)|| dτ
-        # Метод средней точки (O(dζ²)): корректен для любой параметризации кривой.
+        # s_arc += |dζ|·||t(mid)|| (метод средней точки)
         dz = s - self._prev_zeta
         if abs(dz) > 1e-12:
             mid_z = (self._prev_zeta + s) / 2.0
             self._s_arc += abs(dz) * float(np.linalg.norm(self.curve.t(mid_z)))
         self._prev_zeta = s
 
-        # Шаг 2: геометрия в точке s
         alpha = float(self.curve.yaw_star(s))
         beta_val = float(self.curve.beta(s))
         eps_val = float(self.curve.eps(s))
@@ -414,14 +258,11 @@ class PathFollowingController:
         W = W_mat(alpha, beta_val, eps_val)
         Winv = W_inv(alpha, beta_val, eps_val)
 
-        # Шаг 3: вектор ошибок
         lam1 = self._lambda_tilde_1(p_xyz, phi, s)
 
-        # Шаг 4: матрица входов b
         b = b_mat(phi, theta, psi, u1, g=self._model.g)
         binv = _safe_inv4(b)
 
-        # Шаг 5: оценки наблюдателя (от предыдущего шага)
         l1h, l2h, l3h, l4h, sigma = self.obs.hat()
         g1, g2, g3, g4 = (
             self.p.gamma[0], self.p.gamma[1],
@@ -429,28 +270,25 @@ class PathFollowingController:
         )
         g5 = self.p.gamma[4]
 
-        # Шаг 6: закон управления U_bar (уравнение 72)
+        # U_bar = sat_L[b^{-1}W^{-1}(-σ - Σγi·λ̂i)] (ур. 72)
         v = -sigma - g1*l1h - g2*l2h - g3*l3h - g4*l4h
         Ubar = sat_tanh_vec(binv @ (Winv @ v), self.p.L)
 
-        # Шаг 7: eta-расширение (уравнение 71)
+        # η-расширение: U = γ5·η + Ū, η̇ = Ū (ур. 71)
         self._eta += dt * Ubar
         U = g5 * self._eta + Ubar
 
-        # Шаг 8: обновление наблюдателя (уравнение 76)
+        # Обновление наблюдателя (ур. 76)
         y4_model = W @ (b @ Ubar)
         self.obs.step(y=lam1, y4_model=y4_model, dt=dt)
 
-        # Шаг 9: обновление ссылочной длины дуги s_ref = ∫₀ᵗ V*(τ) dτ.
-        # ВАЖНО: обновляем В КОНЦЕ шага, чтобы при t=0 lam1[0] = s_arc - s_ref = 0,
-        # что согласуется с warm-start (obs.x1[0] = 0). Только тогда e = 0 на первом шаге,
-        # и высокоусиленный наблюдатель (kappa=200) не взрывается из-за начальной ошибки.
+        # s_ref += V*·dt — обновляется В КОНЦЕ шага, чтобы при t=0 lam1[0]=0 и
+        # высокоусиленный наблюдатель (kappa=200) не взрывался от ненулевой начальной ошибки.
         self._s_ref += self.Vstar * dt
 
         return U.astype(float)
 
     def reset(self, zeta0: float = 0.0) -> None:
-        """Сбросить внутреннее состояние регулятора к начальному."""
         self._nearest.reset(zeta0)
         self._eta[:] = 0.0
         self.obs.reset()
@@ -460,47 +298,16 @@ class PathFollowingController:
 
     @property
     def zeta(self) -> float:
-        """Текущая оценка параметра ближайшей точки."""
         return self._nearest.zeta
 
 
-# ===========================================================================
-# 4. Конфигурация и результаты моделирования
-# ===========================================================================
-
 @dataclass
 class SimConfig:
-    """Параметры симуляции согласованного управления.
+    """Параметры симуляции (Гл. 4). Дефолт: спираль (kappa=200, dt=0.002).
 
-    Значения по умолчанию соответствуют параметрам диссертации (стр. 44)
-    для сценария со спиралью (kappa=200, dt=0.002).
-
-    Атрибуты:
-        Vstar          -- желаемая параметрическая скорость V* [м/с]
-        T              -- время симуляции [с]
-        dt             -- шаг интегрирования RK4 [с]
-                          Важно: kappa=100 -> dt<=0.01; kappa=200 -> dt<=0.005
-        x0             -- начальное состояние 16D (None -> старт в p(zeta0))
-        kappa          -- коэффициент усиления наблюдателя производных
-        a              -- коэффициенты полинома наблюдателя (5-кортеж)
-        gamma          -- коэффициенты регулятора (5-кортеж):
-                          gamma1..gamma4 -- обратная связь по производным ошибки
-                          gamma5 -- вес eta-интегратора (динамическое расширение)
-        L              -- уровень насыщения sat_tanh(., L)
-        ell            -- параметр из условия (63): 0 < ell < 1
-        gamma_nearest  -- коэффициент наблюдателя ближайшей точки (Лемма 3)
-        zeta0          -- начальное значение параметра кривой
-        use_numerical_grad -- True: точный dH/dzeta для наблюдателя ближайшей точки
-        nearest_fn     -- аналитическая функция ближайшей точки (опционально):
-                          nearest_fn(p_xyz: np.ndarray) -> float
-                          Пример: nearest_fn=nearest_point_line для прямой x=s,y=s,z=s
-        quad_model     -- физические параметры дрона; None → нормализованная модель
-        speed_fn       -- адаптивная функция скорости (опционально):
-                          speed_fn(state: np.ndarray, s: float) -> float
-                          None → использовать постоянную скорость Vstar (поведение по умолчанию)
-                          Пример:
-                            from ml.dataset.features import feature_vector
-                            speed_fn = lambda x, s: predictor.predict(feature_vector(x, curve, s=s))
+    Ключевое: kappa=100 → dt≤0.01, kappa=200 → dt≤0.005 (условие наблюдателя).
+    nearest_fn (опц.) — аналитическая ближайшая точка вместо численного наблюдателя.
+    speed_fn (опц.) — callable(state, s) → V* для NN-режима.
     """
     Vstar: float = 1.0
     T: float = 30.0
@@ -526,22 +333,7 @@ class SimConfig:
 
 @dataclass
 class SimResult:
-    """Результаты симуляции согласованного управления.
-
-    Атрибуты:
-        t        -- массив времени [n]
-        x        -- траектория состояния [n x 16]
-        zeta     -- параметр ближайшей точки [n]
-        p_ref    -- опорная траектория (ближайшие точки на кривой) [n x 3]
-        errors   -- ошибки регулирования [n x 4]:
-                    col 0: s_arc - V*t [м]
-                    col 1: e1 [м]  (боковая ошибка 1)
-                    col 2: e2 [м]  (боковая ошибка 2)
-                    col 3: delta_phi [рад]  (ошибка рысканья)
-        velocity -- норма скорости ||v|| [n]
-        curve    -- геометрия кривой
-        cfg      -- конфигурация симуляции
-    """
+    """Результаты: t, x[n×16], zeta[n], p_ref[n×3], errors[n×4]=[s_arc−s_ref, e1, e2, δφ], velocity[n]."""
     t: np.ndarray
     x: np.ndarray
     zeta: np.ndarray
@@ -552,13 +344,12 @@ class SimResult:
     cfg: SimConfig
 
     def print_summary(self) -> None:
-        """Вывести сводку финальных ошибок и скорости."""
+        """Сводка финальных ошибок и скорости."""
         import sys
         out = sys.stdout
-        # На Windows консоль может использовать cp866/cp1251 — принудительно UTF-8
         try:
             if hasattr(out, "reconfigure"):
-                out.reconfigure(encoding="utf-8")
+                out.reconfigure(encoding="utf-8")  # UTF-8 для Windows
         except Exception:
             pass
 
@@ -573,11 +364,7 @@ class SimResult:
         print(f"    zeta_final   = {self.zeta[-1]:.4f}")
 
     def plot(self, out_dir: str, prefix: str = "sim") -> None:
-        """Сохранить 6 графиков результатов в директорию out_dir.
-
-        Файлы: {prefix}_traj_3d.png, _traj_xy.png, _errors.png,
-               _yaw_error.png, _velocity.png, _angles.png
-        """
+        """Сохранить 6 PNG: traj_3d, traj_xy, errors, yaw_error, velocity, angles."""
         os.makedirs(out_dir, exist_ok=True)
 
         _plot_3d_traj(
@@ -614,23 +401,11 @@ class SimResult:
         print(f"  Графики сохранены в {display_path(out_dir)}")
 
 
-# ===========================================================================
-# 5. Главная функция симуляции
-# ===========================================================================
-
 def simulate_path_following(
     curve: CurveGeom,
     cfg: SimConfig,
 ) -> SimResult:
-    """Симулировать согласованное управление квадрокоптером вдоль кривой.
-
-    Параметры:
-        curve  -- геометрия кривой (из make_curve() или geometry.spiral_curve() и т.п.)
-        cfg    -- параметры симуляции (SimConfig)
-
-    Возвращает:
-        SimResult -- результаты: траектории, ошибки, скорость, опорная кривая
-    """
+    """Симулировать согласованное управление квадрокоптера вдоль curve по cfg. Вернуть SimResult."""
     params = HighGainParams(
         kappa=cfg.kappa,
         a=tuple(cfg.a),
@@ -665,23 +440,13 @@ def simulate_path_following(
     )
     ctrl._vstar_max_rate = cfg.vstar_max_rate
 
-    # Тёплый старт наблюдателя производных (предотвращает взрыв sigma при perturbation).
-    #
-    # Проблема: при ненулевых начальных возмущениях x0, e = lam1_0 - x1_obs ≠ 0.
-    # Явный Эйлер:  x2_new += dt × k²·a2·e  →  10^4·10·0.01 × e = 1000·e (в 10× больше реального dlam1/dt).
-    # sigma_new += dt × k^5·a5·e → 10^8 × e (гигантское значение, управление насыщается).
-    #
-    # Решение: инициализировать x1_obs = lam1_0 и x2_obs = dlam1/dt|₀ ≈ Frenet-проекция скорости.
-    # Тогда e = 0 на первом шаге и observer корректно отслеживает далее.
-    # Для x0=0 (обычные сценарии): lam1_0 ≈ 0, vel ≈ 0 → obs ≈ 0 (обратная совместимость).
+    # Warm-start наблюдателя: x1=lam1_0, x2=dlam1/dt|0 — иначе при kappa=200 и ненулевой
+    # начальной ошибке sigma_dot ~ k^5·e взрывается (10⁸·e). Для x0=0 → obs=0 (совместимость).
     from drone_sim.geometry.curves import Rz as _Rz, Ry as _Ry
     _zeta0 = float(cfg.zeta0)
     lam1_0 = ctrl._lambda_tilde_1(x0[0:3], float(x0[6]), _zeta0)
     ctrl.obs.x1 = lam1_0.copy()
-    # x2_obs ≈ dlam1/dt: Frenet-проекция начальной скорости
-    # Компоненты e1, e2 изменяются со скоростью проекции vel_0 на оси Frenet-frame.
-    # Компонента s_arc-s_ref: ds_arc/dt≈0, ds_ref/dt=V* → d(lam1[0])/dt ≈ -V*
-    # Компонента d_phi: phi_dot = x0[9], yaw_star не меняется мгновенно → d(lam1[3])/dt ≈ phi_dot
+    # x2 = dlam1/dt ≈ Frenet-проекция начальной скорости + d(s_arc-s_ref)/dt = -V*
     _alpha0 = float(curve.yaw_star(_zeta0))
     _beta0 = float(curve.beta(_zeta0))
     _vel0 = x0[3:6]
@@ -697,18 +462,14 @@ def simulate_path_following(
     def dynamics(x: np.ndarray, U: np.ndarray) -> np.ndarray:
         return quad_dynamics_16(x, U, L=cfg.L, model=model)
 
-    # runner.py вызывает step() ДВАЖДЫ при t=0: сначала перед циклом (для определения
-    # размерности U), потом снова в цикле при k=0. В старом коде Vstar*t=0 при t=0,
-    # поэтому двойной вызов был безвреден. В новом коде s_ref += Vstar*dt при каждом
-    # вызове → наблюдатель получает ошибку и sigma взрывается.
-    # Решение: после pre-loop вызова восстанавливаем состояние (warm-start повторяется).
+    # runner.py вызывает step() ДВАЖДЫ при t=0 (pre-loop + k=0). s_ref += V*·dt в каждом
+    # вызове → ошибка, sigma взрывается. Решение: после pre-loop восстановить состояние.
     _pre_loop_done = [False]
-    _vstar_log: list[float] = []    # история V* по шагам (для post-hoc s_ref)
+    _vstar_log: list[float] = []
 
     def step(t: float, x: np.ndarray, Uprev, dt: float) -> np.ndarray:
         U = ctrl.step(t, x, Uprev, dt)
         if not _pre_loop_done[0]:
-            # Это был pre-loop вызов → сбрасываем состояние до начального
             ctrl.reset(cfg.zeta0)
             ctrl._prev_V = cfg.Vstar
             ctrl.obs.x1 = lam1_0.copy()
@@ -726,8 +487,7 @@ def simulate_path_following(
     zeta_arr = _recompute_zeta(x_arr, curve, cfg)
     p_ref = np.stack([curve.p(z) for z in zeta_arr], axis=0)
 
-    # Длина дуги как интеграл ∫₀^ζ ||t(τ)|| dτ (метод средней точки).
-    # Корректна для любой параметризации; для ||t||=const совпадает с ζ·||t||.
+    # s_arc = ∫₀^ζ ||t(τ)||dτ (метод средней точки)
     s_arc_arr = np.zeros(n, dtype=float)
     for k in range(1, n):
         dz = zeta_arr[k] - zeta_arr[k - 1]
@@ -737,17 +497,13 @@ def simulate_path_following(
         else:
             s_arc_arr[k] = s_arc_arr[k - 1]
 
-    # s_ref = ∫₀ᵗ V*(τ) dτ — реконструируем из истории V* (накопленной в _vstar_log).
-    # _vstar_log[k] = V* на шаге k (начиная с k=0 первого реального шага цикла).
-    # Длина _vstar_log = n-1 (последний шаг не записывается, т.к. runner не вызывает step).
-    # Для шага k=0 s_ref=0, далее s_ref[k] = sum(V*[0..k-1]) * dt.
+    # s_ref = ∫₀ᵗ V*(τ)dτ — реконструируем из _vstar_log; fallback на V*·t при const-режиме
     s_ref_arr = np.zeros(n, dtype=float)
     vlog = _vstar_log if len(_vstar_log) == n - 1 else None
     if vlog is not None:
         for k in range(1, n):
             s_ref_arr[k] = s_ref_arr[k - 1] + float(vlog[k - 1]) * cfg.dt
     else:
-        # Fallback: при speed_fn=None или несоответствии длин
         s_ref_arr = cfg.Vstar * t_arr
 
     errors = np.zeros((n, 4), dtype=float)
@@ -772,7 +528,7 @@ def _recompute_zeta(
     curve: CurveGeom,
     cfg: SimConfig,
 ) -> np.ndarray:
-    """Прогнать наблюдатель ближайшей точки на записанной траектории."""
+    """Post-hoc восстановление ζ по записанной траектории (для plot/errors)."""
     n = len(x_arr)
     zeta_arr = np.zeros(n, dtype=float)
 
@@ -791,10 +547,6 @@ def _recompute_zeta(
 
     return zeta_arr
 
-
-# ===========================================================================
-# 6. Утилиты визуализации (автономные)
-# ===========================================================================
 
 def _plot_3d_traj(p_ref, p_real, outpath, title=""):
     fig = plt.figure(figsize=(10, 6))

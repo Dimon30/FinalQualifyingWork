@@ -1,23 +1,7 @@
-"""
-test_curves.py — pytest тесты согласованного управления на базовых кривых.
+"""pytest-тесты согласованного управления на 6 базовых кривых.
 
-Запуск:
-    pytest code_app/tests/                        # все тесты (из корня проекта)
-    pytest code_app/tests/ -v                     # с именами тестов
-    pytest code_app/tests/ -k spiral_r3          # конкретный тест
-    pytest code_app/tests/ --fast                 # ускоренный прогон (T×0.25)
-    pytest code_app/tests/ -s                     # с выводом print
-
-Каждый тест симулирует движение дрона вдоль заданной кривой и проверяет,
-что финальные боковые ошибки ||[e1, e2]|| < PASS_THRESHOLD.
-
-Описание сценариев:
-    spiral_r3       — круговая спираль r=3 (как в диссертации)
-    circle_r3_z5    — горизонтальная окружность r=3 на z=5
-    helix_r2        — круговая спираль r=2 (промежуточный радиус)
-    line_diagonal   — прямая x=s,y=s,z=s с аналитической nearest_fn
-    line_xz_plane   — прямая x=s,y=0,z=0.5s с аналитической nearest_fn
-    spiral_r1_5     — спираль r=1.5 (плотные витки, gamma_nearest=20)
+Каждый тест симулирует движение дрона вдоль кривой и проверяет ||[e1,e2]||_final < 1.5 м.
+Опция --fast уменьшает T в 4 раза.
 """
 import os
 import sys
@@ -27,21 +11,14 @@ import numpy as np
 from drone_sim import make_curve, SimConfig, simulate_path_following
 from drone_sim.geometry.curves import spiral_curve, line_xyz_curve, nearest_point_line
 
-# ---------------------------------------------------------------------------
-# Порог прохождения теста
-# ---------------------------------------------------------------------------
-PASS_THRESHOLD = 1.5   # м — ||[e1, e2]||_final
+PASS_THRESHOLD = 1.5   # м — порог ||[e1, e2]||_final
 
-# ---------------------------------------------------------------------------
-# Аналитическая ближайшая точка для прямой p(s)=[s, 0, 0.5*s]
-# ---------------------------------------------------------------------------
+
 def _nearest_line_xz(p_xyz: np.ndarray) -> float:
+    """Аналитическая ближайшая точка для прямой p(s)=[s, 0, 0.5s]."""
     return float((2.0 * p_xyz[0] + 0.5 * p_xyz[2]) / 2.5)
 
 
-# ---------------------------------------------------------------------------
-# Описания тестовых сценариев
-# ---------------------------------------------------------------------------
 TESTS = [
     dict(
         name="spiral_r3",
@@ -73,14 +50,13 @@ TESTS = [
     ),
     dict(
         name="line_diagonal",
-        title="Прямая x=s,y=s,z=s (nearest_fn=nearest_point_line)",
+        title="Прямая x=s,y=s,z=s (аналитическая nearest_fn)",
         curve_fn=lambda: line_xyz_curve(),
         x0_pos=np.array([0.0, 0.0, 0.0]),
         cfg=dict(Vstar=1.0, T=30.0, dt=0.005, kappa=100.0,
                  gamma=(1., 3., 5., 3., 1.), gamma_nearest=1.0, zeta0=0.0,
                  nearest_fn=nearest_point_line),
     ),
-    # TODO перепроверить алгоритм, есть подозрение что написано неправильно
     dict(
         name="line_xz_plane",
         title="Прямая x=s,y=0,z=0.5s (аналитическая nearest_fn)",
@@ -103,28 +79,18 @@ TESTS = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Фикстура: опция --fast
-# ---------------------------------------------------------------------------
 @pytest.fixture
 def fast_mode(request):
     return request.config.getoption("--fast")
 
 
-# ---------------------------------------------------------------------------
-# Директория для графиков
-# ---------------------------------------------------------------------------
 _OUT_ROOT = os.path.join(os.path.dirname(__file__), "..", "out_images", "tests")
 
 
-# ---------------------------------------------------------------------------
-# Параметризованный тест
-# ---------------------------------------------------------------------------
 @pytest.mark.parametrize("spec", TESTS, ids=[t["name"] for t in TESTS])
 def test_path_following(spec, fast_mode):
-    """Проверить, что ||[e1, e2]||_final < PASS_THRESHOLD для каждой кривой."""
+    """Финальная боковая ошибка ||[e1,e2]|| должна быть < PASS_THRESHOLD."""
     cfg_kw = spec["cfg"].copy()
-
     if fast_mode:
         cfg_kw["T"] = cfg_kw["T"] * 0.25
 
@@ -134,10 +100,8 @@ def test_path_following(spec, fast_mode):
     x0[0:3] = spec["x0_pos"]
 
     cfg = SimConfig(x0=x0, **cfg_kw)
-
     result = simulate_path_following(curve, cfg)
 
-    # Сохранить графики
     out_dir = os.path.join(_OUT_ROOT, spec["name"])
     result.plot(out_dir=out_dir, prefix=spec["name"])
 

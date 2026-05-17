@@ -65,10 +65,10 @@ class SpeedPPO(nn.Module):
     def forward_policy(
         self, x: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Вернуть (mean, std) — параметры Гауссовского распределения политики."""
+        """Вернуть (mean, std). log_std clamp в [-1, 1] для предотвращения коллапса политики."""
         h = self.policy_backbone(x)
         mean = torch.sigmoid(self.policy_head(h)) * self.max_speed
-        std = torch.exp(self.log_std).clamp(min=1e-4).expand_as(mean)
+        std = torch.exp(self.log_std.clamp(min=-1.0, max=1.0)).expand_as(mean)
         return mean, std
 
     def forward_value(self, x: torch.Tensor) -> torch.Tensor:

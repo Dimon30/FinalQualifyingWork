@@ -1,15 +1,4 @@
-"""Фиксированный набор тестовых сценариев для бенчмарка моделей V*.
-
-Каждый сценарий описывает одну кривую с полными параметрами симуляции.
-Набор детерминирован — служит воспроизводимым стандартом сравнения.
-
-Использование::
-
-    from ml.evaluation.test_suite import get_test_suite
-
-    for scenario in get_test_suite():
-        print(scenario.name, scenario.label)
-"""
+"""Фиксированный набор из 4 тестовых сценариев для бенчмарка V*-моделей."""
 from __future__ import annotations
 
 import numpy as np
@@ -27,17 +16,7 @@ from drone_sim.geometry.curves import (
 
 @dataclass
 class TestScenario:
-    """Один тестовый сценарий бенчмарка.
-
-    Атрибуты:
-        name        — машинное имя (используется в именах файлов)
-        label       — человеко-читаемое описание (для графиков и отчёта)
-        curve       — геометрия кривой CurveGeom
-        x0          — начальный вектор состояния [16]
-        cfg_kw      — словарь параметров SimConfig (кроме Vstar/speed_fn/quad_model)
-        warmup_time — время прогрева в секундах (NN неактивна)
-        vstar_rate  — максимальный темп изменения V* [1/с]
-    """
+    """Один сценарий бенчмарка: name, label, curve, x0, cfg_kw, warmup_time, vstar_rate."""
     name: str
     label: str
     curve: CurveGeom
@@ -48,15 +27,10 @@ class TestScenario:
 
 
 def get_test_suite() -> list[TestScenario]:
-    """Вернуть фиксированный тестовый набор из 4 сценариев.
+    """4 фиксированных сценария: spiral_r3, circle_r3z5, helix_r2, line_diag.
 
-    Сценарии выбраны для покрытия разных геометрических режимов:
-    - spiral_r3   : высокая ||t||, стандарт диссертации
-    - circle_r3z5 : плоская замкнутая кривая
-    - helix_r2    : промежуточная кривизна, ||t||=√5
-    - line_diag   : прямая (аналитическая ближайшая точка)
+    Покрывают разные геометрические режимы: высокая/средняя ||t||, плоская кривая, прямая.
     """
-    # --- Спираль r=3 ----------------------------------------------------------
     x0_spiral = np.zeros(16)
     x0_spiral[0:3] = [2.9, 0.0, 0.0]
     spiral_r3 = TestScenario(
@@ -72,7 +46,6 @@ def get_test_suite() -> list[TestScenario]:
         vstar_rate=0.3,
     )
 
-    # --- Горизонтальная окружность r=3, z=5 -----------------------------------
     x0_circle = np.zeros(16)
     x0_circle[0:3] = [3.0, 0.0, 5.0]
     circle_r3z5 = TestScenario(
@@ -88,7 +61,6 @@ def get_test_suite() -> list[TestScenario]:
         vstar_rate=0.3,
     )
 
-    # --- Спираль r=2 ----------------------------------------------------------
     x0_helix = np.zeros(16)
     x0_helix[0:3] = [1.9, 0.0, 0.0]
     helix_r2 = TestScenario(
@@ -104,7 +76,6 @@ def get_test_suite() -> list[TestScenario]:
         vstar_rate=0.3,
     )
 
-    # --- Прямая x=s, y=s, z=s -------------------------------------------------
     x0_line = np.zeros(16)
     x0_line[0:3] = [0.0, 0.0, 0.0]
     line_diag = TestScenario(

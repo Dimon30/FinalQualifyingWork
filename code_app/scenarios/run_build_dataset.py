@@ -48,15 +48,16 @@ def plot_dataset_stats(csv_path: str, out_dir: str) -> None:
 
     # Distribution of V_opt and curvature.
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    axes[0].hist(data["V_opt"], bins=30, color="steelblue", edgecolor="white")
-    axes[0].set_xlabel("V_opt")
-    axes[0].set_ylabel("Count")
-    axes[0].set_title(f"Target speed distribution (N={N})")
+    axes[0].hist(data["V_opt"], bins=70, color="steelblue", edgecolor="white")
+    axes[0].set_xlabel("$V_{\\mathrm{opt}}$, м/с")
+    axes[0].set_ylabel("Количество")
+    axes[0].set_title(f"Распределение целевой скорости (N={N})")
     axes[0].grid(True, linestyle="--", alpha=0.6)
 
     axes[1].hist(data["kappa"], bins=30, color="coral", edgecolor="white")
-    axes[1].set_xlabel("kappa (normalized)")
-    axes[1].set_title("Curvature distribution")
+    axes[1].set_xlabel("$\\kappa$ (нормированная кривизна)")
+    axes[1].set_ylabel("Количество")
+    axes[1].set_title("Распределение кривизны")
     axes[1].grid(True, linestyle="--", alpha=0.6)
 
     fig.tight_layout()
@@ -85,15 +86,17 @@ def plot_dataset_stats(csv_path: str, out_dir: str) -> None:
             ax.plot(xline, np.polyval(z, xline), "r-", linewidth=1.5)
         except Exception:
             pass
-        ax.set_xlabel(col)
-        ax.set_ylabel("V_opt")
-        ax.set_title(f"{col} vs V_opt")
+        # column names стандартные (e1, e2, kappa, …) — оставляем как переменные
+        ax.set_xlabel(f"${col}$" if col in {"e1", "e2", "kappa"} else col)
+        ax.set_ylabel("$V_{\\mathrm{opt}}$, м/с")
+        title_col = f"${col}$" if col in {"e1", "e2", "kappa"} else col
+        ax.set_title(f"{title_col} vs $V_{{\\mathrm{{opt}}}}$")
         ax.grid(True, linestyle="--", alpha=0.5)
 
     for j in range(n_f, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle("Feature scatter plots", fontsize=13)
+    fig.suptitle("Зависимости признаков и целевой скорости", fontsize=13)
     fig.tight_layout()
     p = os.path.join(out_dir, "dataset_features_scatter.png")
     fig.savefig(p, dpi=150)
@@ -113,8 +116,8 @@ def plot_dataset_stats(csv_path: str, out_dir: str) -> None:
     colors = ["steelblue" if v >= 0 else "coral" for v in vals]
     ax.barh(names, vals, color=colors, edgecolor="white")
     ax.axvline(0, color="black", linewidth=0.8)
-    ax.set_xlabel("Pearson correlation with V_opt")
-    ax.set_title("Feature correlation")
+    ax.set_xlabel("Корреляция Пирсона с $V_{\\mathrm{opt}}$")
+    ax.set_title("Корреляция признаков с целевой скоростью")
     ax.grid(True, linestyle="--", alpha=0.5, axis="x")
     fig.tight_layout()
     p = os.path.join(out_dir, "dataset_correlations.png")

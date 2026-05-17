@@ -36,10 +36,9 @@
 \contentsline {section}{\numberline {3.1}Организация вычислительного эксперимента}{19}{section.3.1}%
 \contentsline {section}{\numberline {3.2}Анализ сформированного датасета}{19}{section.3.2}%
 \contentsline {section}{\numberline {3.3}Обучение модели MLP}{21}{section.3.3}%
-\contentsline {section}{\numberline {3.4}Обучение моделей SAC, TD3 и PPO}{21}{section.3.4}%
-\contentsline {section}{\numberline {3.5}Работа моделей на базовом сценарии: сравнение с baseline}{23}{section.3.5}%
-\contentsline {section}{\numberline {3.6}Сравнение моделей на наборе бенчмарков}{31}{section.3.6}%
-\contentsline {section}{\numberline {3.7}Интерпретация результатов}{37}{section.3.7}%
-\contentsline {section}{\numberline {3.8}Выводы по главе}{37}{section.3.8}%
-\contentsline {chapter}{Заключение}{38}{chapter*.42}%
-\contentsline {chapter}{Список используемых источников}{40}{chapter*.43}%
+\contentsline {section}{\numberline {3.4}Обучение моделей SAC, TD3 и PPO}{22}{section.3.4}%
+\contentsline {section}{\numberline {3.5}Работа моделей на базовом сценарии: сравнение с baseline}{24}{section.3.5}%
+\contentsline {section}{\numberline {3.6}Сравнение моделей на наборе бенчмарков}{32}{section.3.6}%
+\contentsline {section}{\numberline {3.7}Интерпретация результатов}{38}{section.3.7}%
+\contentsline {section}{\numberline {3.8}Выводы по главе}{38}{section.3.8}%
+\contentsline {chapter}{Заключение}{40}{chapter*.42}%

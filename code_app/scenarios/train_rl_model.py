@@ -97,19 +97,20 @@ def plot_training(result: TrainResult, model_name: str, out_dir: str) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(14, 4))
 
     for ax, yscale in zip(axes, ["linear", "log"]):
-        ax.plot(epochs, result.train_losses, label="Train", color="steelblue", linewidth=1.8)
-        ax.plot(epochs, result.val_losses, label="Val", color="coral", linewidth=1.8)
+        ax.plot(epochs, result.train_losses, label="Обучение", color="steelblue", linewidth=1.8)
+        ax.plot(epochs, result.val_losses, label="Валидация", color="coral", linewidth=1.8)
         ax.axvline(result.stopped_epoch, color="gray", linestyle="--", linewidth=1.2,
-                   label=f"Early stop (ep {result.stopped_epoch})")
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Loss")
+                   label=f"Ранняя остановка (эпоха {result.stopped_epoch})")
+        ax.set_xlabel("Эпоха")
+        ax.set_ylabel("Функция потерь")
         ax.set_yscale(yscale)
-        ax.set_title(f"{model_name.upper()} — loss ({'log' if yscale == 'log' else 'linear'})")
+        scale_label = "лог. шкала" if yscale == "log" else "лин. шкала"
+        ax.set_title(f"{model_name.upper()} — потери ({scale_label})")
         ax.legend()
         ax.grid(True, linestyle="--", alpha=0.6, which="both")
 
     fig.suptitle(
-        f"Обучение {model_name.upper()} | best val = {result.best_val_loss:.6f}",
+        f"Обучение {model_name.upper()} — лучшая валидационная MSE = {result.best_val_loss:.6f}",
         fontsize=12,
     )
     fig.tight_layout()
@@ -133,10 +134,10 @@ def plot_quality(
     lo = min(y_true.min(), y_pred.min()) - 0.05
     hi = max(y_true.max(), y_pred.max()) + 0.05
     ax.scatter(y_true, y_pred, s=5, alpha=0.35, color="steelblue")
-    ax.plot([lo, hi], [lo, hi], "r--", linewidth=1.5, label="Идеал")
-    ax.set_xlabel("V_opt истинное")
-    ax.set_ylabel("V_opt предсказанное")
-    ax.set_title(f"{model_name.upper()} — предсказание vs цель")
+    ax.plot([lo, hi], [lo, hi], "r--", linewidth=1.5, label="Идеальная линия")
+    ax.set_xlabel("$V_{\\mathrm{opt}}$ истинное")
+    ax.set_ylabel("$V_{\\mathrm{opt}}$ предсказанное")
+    ax.set_title(f"{model_name.upper()} — предсказание vs целевое значение")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_aspect("equal")
@@ -147,9 +148,9 @@ def plot_quality(
     ax.axvline(0, color="black", linewidth=1.2, linestyle="--")
     ax.axvline(mae, color="red", linestyle=":", linewidth=1.5, label=f"MAE={mae:.4f}")
     ax.axvline(-mae, color="red", linestyle=":", linewidth=1.5)
-    ax.set_xlabel("Ошибка предсказания")
+    ax.set_xlabel("Ошибка предсказания, м/с")
     ax.set_ylabel("Количество")
-    ax.set_title("Распределение ошибки")
+    ax.set_title("Распределение ошибок предсказания")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
 
@@ -165,12 +166,12 @@ def plot_quality(
             stds.append(float(np.std(err[mask])))
     centers_arr = np.array(centers)
     w = (edges[1] - edges[0]) * 0.7
-    ax.bar(centers_arr, stds, width=w, color="steelblue", alpha=0.7, label="std ошибки")
-    ax.plot(centers_arr, means, "ro-", markersize=5, label="mean ошибки")
+    ax.bar(centers_arr, stds, width=w, color="steelblue", alpha=0.7, label="СКО ошибки")
+    ax.plot(centers_arr, means, "ro-", markersize=5, label="Среднее ошибки")
     ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
-    ax.set_xlabel("Диапазон V_opt")
-    ax.set_ylabel("Ошибка предсказания")
-    ax.set_title("Ошибка по диапазонам")
+    ax.set_xlabel("Диапазон $V_{\\mathrm{opt}}$, м/с")
+    ax.set_ylabel("Ошибка предсказания, м/с")
+    ax.set_title("Ошибка по диапазону целевой скорости")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
 

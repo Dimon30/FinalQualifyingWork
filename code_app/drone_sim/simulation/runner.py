@@ -42,6 +42,11 @@ def simulate(
     U_arr = np.zeros((n, len(U0)))
     U_arr[0] = U0
 
+    # Замечание (для отладки): здесь можно добавить hard-clip ||v|| по
+    # model.max_velocity_norm. Это НЕ основное решение проблемы разгона —
+    # физически корректнее использовать drag (QuadModel.drag) в quad_dynamics_16.
+    # Hard-clip нарушает закон сохранения импульса и маскирует расходимость
+    # регулятора. Использовать только как debug-safety при отладке.
     for k in range(n - 1):
         U_arr[k] = controller_step(t_arr[k], x_arr[k], U_arr[k-1] if k > 0 else None, dt)
         x_arr[k+1] = rk4_step(dynamics_fn, t_arr[k], x_arr[k], U_arr[k], dt)

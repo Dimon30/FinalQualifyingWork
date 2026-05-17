@@ -92,13 +92,15 @@ class SpeedPredictor:
         saved_params = load_drone_params_from_checkpoint(path)
 
         if drone is None:
-            # Восстанавливаем QuadModel из чекпоинта — основной путь
+            # Восстанавливаем QuadModel из чекпоинта — основной путь.
+            # drag читается через .get(...) с дефолтом для совместимости со старыми чекпоинтами.
             drone = QuadModel(
                 min_speed=saved_params["min_speed"],
                 max_speed=saved_params["max_speed"],
                 lateral_error_limit=saved_params["lateral_error_limit"],
                 tangential_error_limit=saved_params["tangential_error_limit"],
                 max_velocity_norm=saved_params["max_velocity_norm"],
+                drag=saved_params.get("drag", QuadModel().drag),
             )
         else:
             # drone передан явно — проверить на расхождение с сохранёнными
@@ -151,6 +153,7 @@ def _warn_drone_mismatch(drone: QuadModel, saved_params: dict, path: str) -> Non
         ("lateral_error_limit",     drone.lateral_error_limit),
         ("tangential_error_limit",  drone.tangential_error_limit),
         ("max_velocity_norm",       drone.max_velocity_norm),
+        ("drag",                    drone.drag),
     ]
     for key, actual in checks:
         expected = saved_params.get(key)

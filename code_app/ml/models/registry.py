@@ -93,6 +93,7 @@ def save_speed_model_any(
         "lateral_error_limit":     drone.lateral_error_limit,
         "tangential_error_limit":  drone.tangential_error_limit,
         "max_velocity_norm":       drone.max_velocity_norm,
+        "drag":                    drone.drag,
     }
 
     model_type = getattr(model, "CODE_NAME", "mlp")
@@ -159,6 +160,8 @@ def drone_from_checkpoint(path: str) -> QuadModel:
         lateral_error_limit=p["lateral_error_limit"],
         tangential_error_limit=p["tangential_error_limit"],
         max_velocity_norm=p["max_velocity_norm"],
+        # backward-compat: старые чекпоинты без поля drag → дефолт из QuadModel
+        drag=p.get("drag", QuadModel().drag),
     )
 
 

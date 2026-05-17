@@ -76,6 +76,16 @@ def quad_dynamics_16(
     b = thrust_direction(phi, theta, psi)
     a = (b * (u1 + g) - np.array([0.0, 0.0, g])) / model.mass
 
+    # Квадратичное аэродинамическое сопротивление: a_drag = -drag * v * ||v||.
+    # Обеспечивает терминальную скорость и предотвращает безграничный разгон
+    # при насыщении тяги. Защита от деления на ноль через порог 1e-12.
+    drag_coef = getattr(model, "drag", 0.0)
+    if drag_coef > 0.0:
+        v = x[3:6]
+        v_norm = float(np.linalg.norm(v))
+        if v_norm > 1e-12:
+            a = a - drag_coef * v * v_norm
+
     xdot = np.zeros(16, dtype=float)
     xdot[0:3] = x[3:6]
     xdot[3:6] = a

@@ -87,6 +87,7 @@ def save_speed_model(model: SpeedMLP, path: str, drone=None) -> None:
         "lateral_error_limit":     drone.lateral_error_limit,
         "tangential_error_limit":  drone.tangential_error_limit,
         "max_velocity_norm":       drone.max_velocity_norm,
+        "drag":                    drone.drag,
     }
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -148,6 +149,12 @@ def load_drone_params_from_checkpoint(path: str) -> dict:
             "lateral_error_limit":     d.lateral_error_limit,
             "tangential_error_limit":  d.tangential_error_limit,
             "max_velocity_norm":       d.max_velocity_norm,
+            "drag":                    d.drag,
         }
 
-    return dict(checkpoint["drone_params"])
+    # backward-compat: чекпоинт может не содержать поля "drag" — добавляем дефолт
+    params = dict(checkpoint["drone_params"])
+    if "drag" not in params:
+        from drone_sim.models.quad_model import QuadModel
+        params["drag"] = QuadModel().drag
+    return params

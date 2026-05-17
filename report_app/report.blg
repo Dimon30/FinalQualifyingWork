@@ -1,15 +1,9 @@
 [0] Config.pm:328> INFO - This is Biber 2.21
 [0] Config.pm:331> INFO - Logfile is 'report.blg'
-[22] biber-darwin:342> INFO - === Sun May 17, 2026, 02:46:54
-[28] Biber.pm:421> INFO - Reading 'report.bcf'
-[50] Biber.pm:1002> INFO - Found 15 citekeys in bib section 0
-[54] Biber.pm:4487> INFO - Processing section 0
-[58] Biber.pm:4678> INFO - Looking for bibtex file 'references.bib' for section 0
-[58] bibtex.pm:1713> INFO - LaTeX decoding ...
-[62] bibtex.pm:1519> INFO - Found BibTeX data source 'references.bib'
-[101] UCollate.pm:68> INFO - Overriding locale 'ru-RU' defaults 'variable = shifted' with 'variable = non-ignorable'
-[101] UCollate.pm:68> INFO - Overriding locale 'ru-RU' defaults 'normalization = NFD' with 'normalization = prenormalized'
-[101] Biber.pm:4307> INFO - Sorting list 'none/global//global/global/global' of type 'entry' with template 'none' and locale 'ru-RU'
-[101] Biber.pm:4313> INFO - No sort tailoring available for locale 'ru-RU'
-[106] bbl.pm:676> INFO - Writing 'report.bbl' with encoding 'UTF-8'
-[109] bbl.pm:779> INFO - Output to report.bbl
+[23] biber-darwin:342> INFO - === Mon May 18, 2026, 02:03:17
+[29] Biber.pm:421> INFO - Reading 'report.bcf'
+[52] Biber.pm:1002> INFO - Found 15 citekeys in bib section 0
+[56] Biber.pm:4487> INFO - Processing section 0
+[60] Biber.pm:4678> INFO - Looking for bibtex file 'references.bib' for section 0
+[60] bibtex.pm:1713> INFO - LaTeX decoding ...
+[64] bibtex.pm:1519> INFO - Found BibTeX data source 'references.bib'

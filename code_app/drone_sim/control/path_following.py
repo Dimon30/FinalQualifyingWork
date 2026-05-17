@@ -175,6 +175,8 @@ class Ch4PathController:
         v = -sigma - g1*l1h - g2*l2h - g3*l3h - g4*l4h
         Ubar = sat_tanh_vec(binv @ (Winv @ v), self.p.L)
 
+        # η-расширение без anti-windup (anti-windup ломал регулятор на тугих
+        # спиралях; разгон при OOD-V* теперь ограничивается drag в quad_dynamics_16).
         self._eta += dt * Ubar
         U = g5 * self._eta + Ubar
 

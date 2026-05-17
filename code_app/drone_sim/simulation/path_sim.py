@@ -274,7 +274,11 @@ class PathFollowingController:
         v = -sigma - g1*l1h - g2*l2h - g3*l3h - g4*l4h
         Ubar = sat_tanh_vec(binv @ (Winv @ v), self.p.L)
 
-        # η-расширение: U = γ5·η + Ū, η̇ = Ū (ур. 71)
+        # η-расширение: U = γ5·η + Ū, η̇ = Ū (ур. 71).
+        # NOTE: anti-windup был добавлен и откатан — он блокировал рост η при
+        # насыщении Ubar и ломал регулятор на тугих спиралях (||v|| улетал
+        # до 60+ м/с даже при V*=0.3). Корень проблемы разгона — отсутствие
+        # drag в quad_dynamics_16; drag=0.05 решает её физически корректно.
         self._eta += dt * Ubar
         U = g5 * self._eta + Ubar
 

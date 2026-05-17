@@ -226,19 +226,20 @@ def _plot_comparison(
         "nn":   (0.85, 0.33, 0.10),
         "ref":  (0.5, 0.5, 0.5),
     }
-    nn_label = f"{model_type.upper()} адаптивная"
+    nn_label = f"{model_type.upper()} (адаптивная $V^*$)"
+    base_label = f"Константная $V^*={Vstar_base}$"
 
     # Ошибки e1, e2.
     fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
     for ax, col, ylabel, title in zip(
         axes,
         [1, 2],
-        ["e1, м", "e2, м"],
-        [f"Тангенциальная ошибка e1 — {curve_label}",
-         f"Поперечная ошибка e2 — {curve_label}"],
+        ["$e_1$, м", "$e_2$, м"],
+        [f"Тангенциальная ошибка $e_1$ — {curve_label}",
+         f"Поперечная ошибка $e_2$ — {curve_label}"],
     ):
         ax.plot(t_base, r_base.errors[:, col], color=C["base"], linewidth=1.8,
-                label=f"Константная V*={Vstar_base}")
+                label=base_label)
         ax.plot(t_nn,   r_nn.errors[:, col],   color=C["nn"],   linewidth=1.8,
                 linestyle="--", label=nn_label)
         ax.axhline(0, color="black", linewidth=0.6, linestyle=":")
@@ -246,7 +247,7 @@ def _plot_comparison(
         ax.set_title(title)
         ax.legend()
         ax.grid(True, linestyle="--", alpha=0.5)
-    axes[-1].set_xlabel("t, с")
+    axes[-1].set_xlabel("$t$, с")
     fig.tight_layout()
     p = os.path.join(out_dir, f"{model_type}_errors.png")
     fig.savefig(p, dpi=150); plt.close(fig)
@@ -255,12 +256,12 @@ def _plot_comparison(
     # Скорости.
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.plot(t_base, r_base.velocity, color=C["base"], linewidth=1.8,
-            label=f"Константная V*={Vstar_base}")
+            label=base_label)
     ax.plot(t_nn,   r_nn.velocity,   color=C["nn"],   linewidth=1.8,
             linestyle="--", label=nn_label)
     ax.axhline(Vstar_base, color=C["ref"], linestyle=":", linewidth=1.5,
-               label=f"Базовая V*={Vstar_base}")
-    ax.set_xlabel("t, с"); ax.set_ylabel("||v||, м/с")
+               label=f"Опорное $V^*={Vstar_base}$")
+    ax.set_xlabel("$t$, с"); ax.set_ylabel("$\\|v\\|$, м/с")
     ax.set_title(f"Линейная скорость — {curve_label}")
     ax.legend(); ax.grid(True, linestyle="--", alpha=0.5)
     fig.tight_layout()
@@ -271,18 +272,18 @@ def _plot_comparison(
     # 3D траектории.
     fig = plt.figure(figsize=(14, 6))
     for i, (result, title, color) in enumerate([
-        (r_base, f"Константная V*={Vstar_base}", C["base"]),
+        (r_base, base_label, C["base"]),
         (r_nn,   nn_label, C["nn"]),
     ]):
         ax3 = fig.add_subplot(1, 2, i + 1, projection="3d")
         p_ref = np.stack([result.curve.p(z) for z in result.zeta], axis=0)
         ax3.plot(p_ref[:, 0], p_ref[:, 1], p_ref[:, 2],
-                 "--", color=C["ref"], linewidth=1.2, label="Заданная")
+                 "--", color=C["ref"], linewidth=1.2, label="Заданная кривая")
         ax3.plot(result.x[:, 0], result.x[:, 1], result.x[:, 2],
-                 color=color, linewidth=1.8, label="Дрон")
-        ax3.set_xlabel("x"); ax3.set_ylabel("y"); ax3.set_zlabel("z")
+                 color=color, linewidth=1.8, label="Траектория дрона")
+        ax3.set_xlabel("$x$, м"); ax3.set_ylabel("$y$, м"); ax3.set_zlabel("$z$, м")
         ax3.set_title(title); ax3.legend(fontsize=8)
-    fig.suptitle(f"3D траектории — {curve_label}", fontsize=12)
+    fig.suptitle(f"Пространственные траектории — {curve_label}", fontsize=12)
     fig.tight_layout()
     p = os.path.join(out_dir, f"{model_type}_3d.png")
     fig.savefig(p, dpi=150); plt.close(fig)
@@ -291,11 +292,11 @@ def _plot_comparison(
     # Ошибка синхронизации s_arc - V*t.
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.plot(t_base, r_base.errors[:, 0], color=C["base"], linewidth=1.8,
-            label=f"Константная V*={Vstar_base}")
+            label=base_label)
     ax.plot(t_nn,   r_nn.errors[:, 0],   color=C["nn"],   linewidth=1.8,
             linestyle="--", label=nn_label)
     ax.axhline(0, color="black", linewidth=0.6, linestyle=":")
-    ax.set_xlabel("t, с"); ax.set_ylabel("s_arc - V*t, м")
+    ax.set_xlabel("$t$, с"); ax.set_ylabel("$s_{\\mathrm{arc}} - s_{\\mathrm{ref}}$, м")
     ax.set_title(f"Ошибка синхронизации — {curve_label}")
     ax.legend(); ax.grid(True, linestyle="--", alpha=0.5)
     fig.tight_layout()

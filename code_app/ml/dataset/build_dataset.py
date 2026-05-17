@@ -48,27 +48,24 @@ def _make_state_on_curve(
     spec: CurveSpec,
     s: float,
     rng: Optional[np.random.Generator] = None,
-    pos_std: float = 0.05,
-    vel_std: float = 0.1,
+    pos_std: float = 0.01,   # ±1 см вокруг кривой (было 0.05 м — слишком много)
+    vel_std: float = 0.02,   # ±2 см/с (было 0.1 м/с — это 33% от V_min=0.3, ломало переходный)
 ) -> np.ndarray:
     """Create a 16D state near the curve at ``s`` with optional perturbations.
 
-    Without perturbations the drone sits exactly on the curve with zero
-    velocity, which makes all dynamic features (e1, e2, v_norm, …) identically
-    zero in the dataset.  Passing ``rng`` adds small Gaussian noise so that
-    the dataset captures realistic non-zero deviations.
+    Инициализация углов:
+        phi   = yaw_star(s)  — рысканье вдоль касательной (минимизирует d_phi)
+        theta = 0            — горизонтальный старт (КРИТИЧНО!)
 
-    Углы инициализируются из геометрии кривой в точке s:
-        phi   = yaw_star(s)   -- рысканье вдоль касательной
-        theta = beta(s)       -- тангаж вдоль касательной
-    Это предотвращает большую начальную ошибку d_phi = phi - yaw_star(s),
-    которая при phi=0 могла достигать O(1 рад) и делать oracle-ролауты
-    нестабильными из-за transient-всплеска e2.
+    Ранее пробовали theta = beta(s), но это вызывало диверж регулятора
+    (дрон стартует наклонённым + нулевая тяга → падение → ||v|| улетает
+    до 17+ м/с даже при V*=1; save rate падал с 100% до ~25%).
+    Pitch=0 даёт управляемый переходный процесс, как в pytest-тестах.
     """
     x0 = np.zeros(16, dtype=float)
-    x0[0:3] = spec.curve.p(s)          # Position on the curve.
-    x0[6] = spec.curve.yaw_star(s)     # phi aligned with tangent direction.
-    x0[7] = spec.curve.beta(s)         # theta aligned with tangent pitch.
+    x0[0:3] = spec.curve.p(s)              # Position on the curve.
+    x0[6] = float(spec.curve.yaw_star(s))  # phi aligned with horizontal tangent.
+    # x0[7] = 0 (pitch — горизонтальный старт, не из beta(s))
     if rng is not None:
         x0[0:3] += rng.normal(0.0, pos_std, 3)   # ±pos_std м от кривой
         x0[3:6] += rng.normal(0.0, vel_std, 3)   # ±vel_std м/с скорость

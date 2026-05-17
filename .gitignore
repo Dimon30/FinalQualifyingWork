@@ -45,3 +45,11 @@ TEST_REPORT.md
 DEMO_GUIDE_RU.md
 KNOWN_ISSUES.md
 практика
+
+# local files
+*.zip
+CLAUDE.md
+DEMO_GUIDE_RU.md
+KNOWN_ISSUES.md
+TEST_REPORT.md
+algo.py

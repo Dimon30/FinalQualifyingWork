@@ -1,152 +1,169 @@
-\chapter{Экспериментальное исследование и анализ результатов}
+\chapter{Экспериментальное сравнение моделей и анализ результатов}
 
-\section{Организация вычислительного эксперимента}
+\section{Схема проведения экспериментов}
 
-Экспериментальная часть работы построена как последовательное сравнение нескольких способов выбора целевой скорости движения вдоль траектории. Сначала анализируется сформированный датасет и проверяется, насколько он покрывает характерные режимы задачи. Затем рассматривается обучение моделей. После этого модели подключаются в замкнутый контур управления и сравниваются как между собой, так и с baseline-режимом, в котором используется постоянная параметрическая скорость.
+Экспериментальная часть направлена на сравнение работы моделей в симуляциях и их анализ.
+Во всех экспериментах использовался датасет, сформированный по указанному описанию в разделе \autoref{sec:form_dataset}.
+На основе полученных данных обучились модели MLP, SAC, TD3, PPO.
+После обучения модель подключалась к вычислительному контуру и проводилась симуляция.
+Все эксперименты проводились как поочередное сравнение моделей по выбору целевой скорости движения вдоль траектории.
 
-Во всех сценариях сравнение проводится в одних и тех же условиях моделирования. Это позволяет интерпретировать различия в результатах именно как эффект от выбора модели, а не как следствие случайно измененных параметров эксперимента.
+Для начала проанализируем полученный датасет данных, а затем проверим распределение целевой переменной и корреляцию признаков между собой.
+Затем рассмотрим обучение моделей.
+И наконец сравним модели между собой на заданных бенчмарках, где также будет рассмотрен алгоритм с постоянной параметрической скоростью.
+
+Во всех сценариях сравнение проводится при одних и тех же условиях моделирования и конфигурациях дрона.
+Это позволяет интерпретировать различия в результатах именно как эффект от выбора модели, а не как следствие случайно измененных параметров эксперимента.
 
 \section{Анализ сформированного датасета}
 
-Перед обучением моделей важно убедиться, что датасет не является случайным набором точек, а действительно отражает внутреннюю логику задачи. Текущая версия датасета (dataset\_v2) объединяет 8 параллельных прогонов генератора и содержит около 3000 примеров; для каждого сохранены признаки локального состояния и целевое значение $V_{\mathrm{opt}}$, полученное через процедуру подбора допустимой скорости в физической модели с аэродинамическим сопротивлением (drag = 0.05).
+Перед обучением моделей важно посмотреть на то, как данные влияют на таргет и присутствует ли отображение логики задачи слежения.
+Текущий датасет, который используется для обучения и тестирования хранит целевое значение $V_{\mathrm{opt}}$, полученное через процедуру подбора допустимой скорости в физической модели с аэродинамическим сопротивлением.
+Датасет содержит $3069$ примеров, где 45\% составляют окружности, 45\% спирали и 10\% прямых.
+Количество прямых было намерено занижено, так как при нулевой кривизне модель и так будет разгоняться без ограничений, не даёт большой информативности обучающей модели.
 
-На рисунках~\ref{fig:dataset_vopt_kappa}--\ref{fig:dataset_correlations} приведены диагностические графики по сгенерированному датасету. Они позволяют увидеть распределение целевой скорости, связь между кривизной траектории и допустимым темпом движения, а также общую структуру взаимосвязей между признаками.
+На рисунках~\ref{fig:dataset_vopt_kappa}--\ref{fig:dataset_correlations} приведены диагностические графики по сгенерированному датасету.
+Они позволяют увидеть распределение целевой скорости, связь между кривизной траектории и допустимым темпом движения, а также общую структуру взаимосвязей между признаками.
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/dataset_vopt_kappa}
+    \includegraphics[width=\textwidth]{../code_app/out_images/dataset/dataset_vopt_kappa}
     \caption{Связь $V_{\mathrm{opt}}$ и кривизны траектории}
     \label{fig:dataset_vopt_kappa}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/dataset_features_scatter}
-    \caption{Попарные зависимости признаков датасета}
+    \includegraphics[scale=0.46]{../code_app/out_images/dataset/dataset_features_scatter}
+    \caption{Зависимость средней целевой скорости от признаков датасета}
     \label{fig:dataset_features_scatter}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/dataset_correlations}
+    \includegraphics[width=\textwidth]{../code_app/out_images/dataset/dataset_correlations}
     \caption{Корреляции признаков с целевой скоростью $V_{\mathrm{opt}}$}
     \label{fig:dataset_correlations}
 \end{figure}
 \FloatBarrier
 
-По этим графикам видно, что задача не вырождается в тривиальное правило. Значение допустимой скорости действительно зависит от нескольких факторов сразу. Кривизна заметно влияет на верхнюю границу скорости, но не определяет ее полностью: важны также текущие ошибки, направление движения и динамическое состояние. Именно поэтому выбор модели по одному-двум признакам был бы слишком грубым.
+Исходя из корреляций можно понять, что наибольший вклад в результирующую скорость будут вносить признаки, связанные с кривизной траектории.
+И с учетом нашей текущей симуляции, где на объект не действуют дополнительные возмущающие факторы, объект будет формировать управлюещее воздействие на основе геометрических характеристиках и возмущения, которые при иных симуляциях могли бы другим, явно нелинейным способом повлиять на результат выбора скорости.
+Остальные признаки, несвязанные с кривизной, меньше влияют на выбор скорости, но они будут полезны, когда в движении появится больше динамики и предсказательной аналитики.
 
 \section{Обучение модели MLP}
 
-Сначала была обучена базовая полносвязная модель MLP. Ее динамика обучения и качество приближения оракульных значений показаны на рисунках~\ref{fig:mlp_loss}--\ref{fig:mlp_quality}. На первом графике приведено изменение функции потерь, на втором~--- сопоставление реальных и предсказанных значений допустимой скорости.
+Сначала была обучена базовая полносвязная модель MLP.
+Ее loss во время обучения и качество приближения скоростей представлены на рисунках~\ref{fig:mlp_loss}--\ref{fig:mlp_quality}.
+На первом графике показано изменение функции потерь, на втором - сопоставление реальных и предсказанных значений допустимой скорости.
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/training_loss}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training/training_loss}
     \caption{MLP: динамика функции потерь при обучении}
     \label{fig:mlp_loss}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/prediction_quality}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training/prediction_quality}
     \caption{MLP: качество аппроксимации $V_{\mathrm{opt}}$}
     \label{fig:mlp_quality}
 \end{figure}
 \FloatBarrier
 
-MLP показывает ожидаемое поведение: ошибка обучения убывает стабильно, без резких колебаний, а итоговая аппроксимация хорошо воспроизводит общий масштаб целевой скорости. При этом уже на этом этапе видно ограничение модели: она склонна к более осторожным прогнозам и хуже передает агрессивные режимы ускорения.
+MLP демонстрирует стабильное обучение без резких колебаний.
+При этом выдает достаточно неплохое качество обучения, мы видим что `MAE` находится в окрестности нуля и в среднем составляет 0.35 м/с.
+Это говорит об отсутствии постоянного смещения модели.
+Но можно заметить, что модель явно склонна делать более осторожные прогнозы и не особо склонна к резким ускорениям.
 
 \section{Обучение моделей SAC, TD3 и PPO}
 
-На следующем этапе были обучены три альтернативные архитектуры: SAC, TD3 и PPO. На рисунках~\ref{fig:sac_loss}--\ref{fig:ppo_quality} показаны их кривые обучения и итоговое качество предсказания. Такое представление позволяет сравнить модели не только по финальному результату, но и по характеру самого процесса обучения.
-
+На следующем этапе были обучены три альтернативные архитектуры: SAC, TD3 и PPO.
+На рисунках ~\ref{fig:sac_loss}--\ref{fig:ppo_quality} приведены их кривые обучения и итоговое качество аппроксимации целевой скорости.
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/sac_loss}
-    \caption{SAC: динамика обучения}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training_rl/sac_loss}
+    \caption{loss во время обучения SAC}
     \label{fig:sac_loss}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/sac_quality}
-    \caption{SAC: качество прогноза $V_{\mathrm{opt}}$}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training_rl/sac_quality}
+    \caption{ошибка прогноза модели SAC}
     \label{fig:sac_quality}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/td3_loss}
-    \caption{TD3: динамика обучения}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training_rl/td3_loss}
+    \caption{loss во время обучения TD3}
     \label{fig:td3_loss}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/td3_quality}
-    \caption{TD3: качество прогноза $V_{\mathrm{opt}}$}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training_rl/td3_quality}
+    \caption{ошибка прогноза модели TD3}
     \label{fig:td3_quality}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/ppo_loss}
-    \caption{PPO: динамика обучения}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training_rl//ppo_loss}
+    \caption{loss во время обучения PPO}
     \label{fig:ppo_loss}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/ppo_quality}
-    \caption{PPO: качество прогноза $V_{\mathrm{opt}}$}
+    \includegraphics[width=\textwidth]{../code_app/out_images/training_rl/ppo_quality}
+    \caption{ошибка прогноза модели PPO}
     \label{fig:ppo_quality}
 \end{figure}
 \FloatBarrier
 
-По характеру графиков видно, что модели ведут себя по-разному. MLP, SAC и TD3 показывают близкие траектории обучения и достигают сопоставимого качества предсказания на тестовой выборке (Test RMSE $\approx$ 0.55--0.57 м/с, R$^2 \approx$ 0.69). PPO в offline-режиме склонен к коллапсу политики к константному значению, что отражается в плохих метриках на валидации; однако в замкнутом контуре управления это поведение успешно компенсируется наблюдателем ошибок и rate-limiter, что и обеспечивает PPO один из самых высоких ускорений в финальном бенчмарке.
+По графикам видно, что модели SAC и TD3 похоже ведут себя в обучении и предсказательной способности: ошибка быстро уменьшается на первых эпохах и далее выходит на непробиваемый уровень без выраженной расходимости.
+Итоговые значения `RMSE` составили порядка 0.557 м/с для SAC и  0.566 м/с для TD3, что близко к результату MLP.
+По гистограммам видно, что распределения ошибок сосредоточены около нуля.
+Однако заметно, что качество предсказания ухудшается при краевых значениях скоростей, особенно в областях с небольшим количеством примеров в датасете.
 
+В то время как PPO показывает более усредненную стратегию выбора скорости.
+Несмотря на формально сопоставимые значения ошибки, модель склонна к частичному вырождению политики и хуже воспроизводит зависимость между локальным состоянием траектории и допустимой скоростью.
+При этом в замкнутом контуре управления часть ошибок компенсируется ограничением скорости изменения управляющего сигнала и работой наблюдателя ошибок, благодаря чему система сохраняет устойчивость даже при менее точном прогнозе \(V_{opt}\).
+В целом эксперименты показывают, что SAC и TD3 в текущей постановке оказываются более устойчивыми и предсказуемыми моделями, чем PPO, а использование RL-подходов в offline-режиме требует более аккуратного построения процедуры обучения и функции награды.
 \section{Работа моделей на базовом сценарии: сравнение с baseline}
 
-Для наглядного сравнения все модели были проверены на одном базовом сценарии~--- движении по спирали радиуса $r=3$. На рисунках~\ref{fig:mlp_errors_spiral}--\ref{fig:ppo_sync_spiral} показаны графики ошибок, скорости, пространственных траекторий и синхронизации для каждой из обученных моделей.
+Для наглядного сравнения все модели были проверены на одном базовом сценарии - движении по спирали радиуса $r=3$.
+На рисунках~\ref{fig:mlp_errors_spiral}--\ref{fig:ppo_sync_spiral} показаны графики ошибок, скорости, пространственных траекторий и синхронизации для каждой из обученных моделей.
 
 \subsection*{Ошибки слежения}
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/mlp_errors}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/mlp_errors}
     \caption{MLP: ошибки слежения на сценарии spiral\_r3}
     \label{fig:mlp_errors_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/sac_errors}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/sac_errors}
     \caption{SAC: ошибки слежения на сценарии spiral\_r3}
     \label{fig:sac_errors_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/td3_errors}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/td3_errors}
     \caption{TD3: ошибки слежения на сценарии spiral\_r3}
     \label{fig:td3_errors_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/ppo_errors}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/ppo_errors}
     \caption{PPO: ошибки слежения на сценарии spiral\_r3}
     \label{fig:ppo_errors_spiral}
 \end{figure}
@@ -156,31 +173,28 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/mlp_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/mlp_velocity}
     \caption{MLP: скоростной профиль на сценарии spiral\_r3}
     \label{fig:mlp_velocity_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/sac_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/sac_velocity}
     \caption{SAC: скоростной профиль на сценарии spiral\_r3}
     \label{fig:sac_velocity_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/td3_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/td3_velocity}
     \caption{TD3: скоростной профиль на сценарии spiral\_r3}
     \label{fig:td3_velocity_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/ppo_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/ppo_velocity}
     \caption{PPO: скоростной профиль на сценарии spiral\_r3}
     \label{fig:ppo_velocity_spiral}
 \end{figure}
@@ -190,31 +204,28 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/mlp_3d}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/mlp_3d}
     \caption{MLP: пространственная траектория на сценарии spiral\_r3}
     \label{fig:mlp_3d_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/sac_3d}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/sac_3d}
     \caption{SAC: пространственная траектория на сценарии spiral\_r3}
     \label{fig:sac_3d_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/td3_3d}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/td3_3d}
     \caption{TD3: пространственная траектория на сценарии spiral\_r3}
     \label{fig:td3_3d_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/ppo_3d}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/ppo_3d}
     \caption{PPO: пространственная траектория на сценарии spiral\_r3}
     \label{fig:ppo_3d_spiral}
 \end{figure}
@@ -226,47 +237,48 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/mlp_sync}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/mlp_sync}
     \caption{MLP: ошибка синхронизации $s_{\mathrm{arc}}-s_{\mathrm{ref}}$ на сценарии spiral\_r3}
     \label{fig:mlp_sync_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/sac_sync}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/sac_sync}
     \caption{SAC: ошибка синхронизации $s_{\mathrm{arc}}-s_{\mathrm{ref}}$ на сценарии spiral\_r3}
     \label{fig:sac_sync_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/td3_sync}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/td3_sync}
     \caption{TD3: ошибка синхронизации $s_{\mathrm{arc}}-s_{\mathrm{ref}}$ на сценарии spiral\_r3}
     \label{fig:td3_sync_spiral}
 \end{figure}
-\FloatBarrier
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/ppo_sync}
+    \includegraphics[width=\textwidth]{../code_app/out_images/compare_rl/spiral/ppo_sync}
     \caption{PPO: ошибка синхронизации $s_{\mathrm{arc}}-s_{\mathrm{ref}}$ на сценарии spiral\_r3}
     \label{fig:ppo_sync_spiral}
 \end{figure}
 \FloatBarrier
 
-По этим графикам различия между моделями становятся видны на качественном уровне. MLP ведет себя наиболее консервативно: прирост средней скорости умеренный (1.23$\times$ на spiral\_r3), но трекинг почти идеальный. SAC и TD3 дают близкие траектории: ускорение 1.66--1.68$\times$ при сравнимой малой ошибке слежения. PPO выдает константное предсказание скорости вблизи 5 м/с, что в сочетании с rate-limiter даёт самое высокое ускорение (2.95$\times$ на spiral\_r3) при сохранении сходимости. На спирали $r{=}3$ все четыре модели сходятся; различия между ними проявляются позже, на наборе бенчмарков с разной геометрией.
+По этим графикам различия между моделями становятся более заметны.
+Модель PPO, в отличие от SAC и TD3, демонстрирует значительно меньшую зависимость прогнозируемой скорости от локального состояния системы.
+Это позволяет получить высокий прирост средней скорости на простых сценариях, однако одновременно снижает чувствительность модели к локальной геометрии траектории.
+В результате модель остается более устойчивой, однако эффект ускорения слабо связан с адаптацией к траектории движения.
 
 \section{Сравнение моделей на наборе бенчмарков}
 
-После анализа отдельного сценария все модели были протестированы на наборе бенчмарков, включающем спираль, окружность, более сложную винтовую траекторию и пространственную прямую. На рисунках~\ref{fig:bench_spiral_e2}--\ref{fig:bench_line_velocity} приведены детальные сравнения по поперечной ошибке и скоростному профилю для каждого сценария, а на рисунках~\ref{fig:summary_e2_rms}--\ref{fig:summary_speedup}~--- итоговые сводные диаграммы.
+После анализа отдельного сценария все модели были протестированы на наборе бенчмарков, включающем спираль, окружность, более сложную винтовую траекторию и пространственную прямую.
+На рисунках~\ref{fig:bench_spiral_e2}--\ref{fig:bench_line_velocity} приведены детальные сравнения по поперечной ошибке и скоростному профилю для каждого сценария, а на рисунках~\ref{fig:summary_e2_rms}--\ref{fig:summary_speedup} - итоговые сводные диаграммы.
 
-\subsection*{Спираль $r=3$ (spiral\_r3)}
+\subsection*{Спираль $r=3$}
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/spiral_r3_e2}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/spiral_r3_e2}
     \caption{Поперечная ошибка $e_2$ на сценарии spiral\_r3}
     \label{fig:bench_spiral_e2}
 \end{figure}
@@ -274,17 +286,17 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/spiral_r3_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/spiral_r3_velocity}
     \caption{Скоростной профиль $\|v\|$ на сценарии spiral\_r3}
     \label{fig:bench_spiral_velocity}
 \end{figure}
 \FloatBarrier
 
-\subsection*{Горизонтальная окружность $r=3$, $z=5$ (circle\_r3z5)}
+\subsection*{Горизонтальная окружность $r=3$, $z=5$}
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/circle_r3z5_e2}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/circle_r3z5_e2}
     \caption{Поперечная ошибка $e_2$ на сценарии circle\_r3z5}
     \label{fig:bench_circle_e2}
 \end{figure}
@@ -292,17 +304,17 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/circle_r3z5_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/circle_r3z5_velocity}
     \caption{Скоростной профиль $\|v\|$ на сценарии circle\_r3z5}
     \label{fig:bench_circle_velocity}
 \end{figure}
 \FloatBarrier
 
-\subsection*{Крутая спираль $r=2$ (helix\_r2)}
+\subsection*{Крутая спираль $r=2$}
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/helix_r2_e2}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/helix_r2_e2}
     \caption{Поперечная ошибка $e_2$ на сценарии helix\_r2}
     \label{fig:bench_helix_e2}
 \end{figure}
@@ -311,17 +323,17 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/helix_r2_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/helix_r2_velocity}
     \caption{Скоростной профиль $\|v\|$ на сценарии helix\_r2}
     \label{fig:bench_helix_velocity}
 \end{figure}
 \FloatBarrier
 
-\subsection*{Пространственная прямая $x=y=z=s$ (line\_diag)}
+\subsection*{Пространственная прямая $x=y=z=s$}
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/line_diag_e2}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/line_diag_e2}
     \caption{Поперечная ошибка $e_2$ на сценарии line\_diag}
     \label{fig:bench_line_e2}
 \end{figure}
@@ -329,7 +341,7 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/line_diag_velocity}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/line_diag_velocity}
     \caption{Скоростной профиль $\|v\|$ на сценарии line\_diag}
     \label{fig:bench_line_velocity}
 \end{figure}
@@ -339,7 +351,7 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/summary_e2_rms}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/summary_e2_rms}
     \caption{Сводное сравнение моделей по RMS поперечной ошибки $e_{2,\mathrm{RMS}}$}
     \label{fig:summary_e2_rms}
 \end{figure}
@@ -347,7 +359,7 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/summary_v_mean}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/summary_v_mean}
     \caption{Сводное сравнение моделей по средней скорости $\bar{\|v\|}$}
     \label{fig:summary_v_mean}
 \end{figure}
@@ -355,38 +367,45 @@ MLP показывает ожидаемое поведение: ошибка о�
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=\textwidth]{images/summary_speedup}
+    \includegraphics[width=\textwidth]{../code_app/out_images/benchmark/summary_speedup}
     \caption{Коэффициент ускорения относительно baseline-режима}
     \label{fig:summary_speedup}
 \end{figure}
 \FloatBarrier
 
-Для полноты результата в отчет включена и таблица с численными метриками, автоматически сформированная модулем оценки.
+Для полноты результата в отчет включена и таблица с численными метриками работы моделей.
 
-\input{tables/summary_table}
+\input{../code_app/out_images/benchmark/summary_table}
 
 Анализ итоговой таблицы показывает несколько устойчивых закономерностей.
 \begin{enumerate}
-    \item MLP стабильно улучшает baseline по средней скорости на простых геометриях (1.14--1.75$\times$), но на сценарии helix\_r2 модель предсказывает агрессивно высокий $V^*$, и слежение разваливается ($e_{2,\mathrm{RMS}} = 18.9$ м). MLP — самый консервативный «безопасный» базовый вариант, но без устойчивости к out-of-distribution состояниям.
-    \item SAC показывает наиболее равномерный результат: стабильность на всех четырёх сценариях бенчмарка ($e_{2,\mathrm{RMS}} \le 0.056$ м) при умеренном ускорении 1.47--2.27$\times$. По совокупности свойств это наиболее надёжная модель.
-    \item TD3 после фиксации физической модели и переобучения наконец работает устойчиво на всех сценариях ($e_{2,\mathrm{RMS}} \le 0.10$ м). Прирост скорости близок к SAC (1.41--2.23$\times$). До исправления физики (drag) TD3 систематически расходился — это подтверждает, что детерминированный актор особенно чувствителен к корректности базовой модели.
-    \item PPO даёт наилучший speedup на трёх из четырёх сценариев (2.13--3.07$\times$), но повторяет проблему MLP на helix\_r2 ($e_{2,\mathrm{RMS}} = 11.5$ м). Высокий темп движения здесь — следствие константного предсказания скорости, обрезаемого safety monitor.
+    \item MLP показывает наиболее предсказуемое поведение на кривых, близких к распределению обучающего датасета, и обеспечивает умеренный прирост средней скорости. Однако на сценарии line\_diag модель демонстрирует существенное ухудшение качества слежения, что указывает на ограниченную устойчивость к out-of-distribution геометриям.
+    \item SAC показывает наиболее сбалансированный результат среди исследуемых моделей: умеренное ускорение сочетается со стабильным качеством слежения на всём наборе тестовых траекторий. В отличие от более агрессивных стратегий, модель не демонстрирует выраженной деградации на сложных геометриях.
+    \item PPO демонстрирует наибольший прирост средней скорости на части сценариев не считая модели MLP, однако качество слежения оказывается менее стабильным по сравнению с SAC и TD3. Несмотря на сохранение сходимости на всех тестовых кривых, модель показывает повышенные поперечные ошибки и склонность к агрессивному выбору скорости на участках с высокой кривизной.
+    \item TD3 занимает промежуточное положение между SAC и PPO. По большинству сценариев алгоритм обеспечивает больший прирост скорости, чем SAC, сохраняя при этом сопоставимое качество слежения. Однако чувствительность результатов к конкретному сценарию оказывается выше, чем у SAC.
 \end{enumerate}
-
-Главным результатом данного эксперимента следует считать то, что после введения аэродинамического сопротивления в физическую модель и пересборки датасета все четыре архитектуры удерживают конечную скорость в пределах терминала $\|v\| \le 14$ м/с, тогда как до исправления модели разгон достигал 200+ м/с на сценариях с большой кривизной.
 
 \section{Интерпретация результатов}
 
-Полученные результаты подтверждают исходную гипотезу работы: адаптивный выбор параметрической скорости действительно позволяет ускорить прохождение траектории без полной переработки базового контура управления. При этом само качество решения сильно зависит от взаимодействия модели и физической постановки задачи.
-
-Ключевой вывод: корректность физической модели влияет на качество всех четырёх архитектур сильнее, чем выбор конкретного алгоритма обучения. До добавления аэродинамического сопротивления в динамику симуляции даже корректно обученные модели приводили дрон в нефизичные режимы движения с $\|v\| \ge 200$~м/с; после введения drag и пересборки датасета все модели удерживают $\|v\|_\mathrm{final} \le 14$~м/с.
-
-Если приоритетом является надёжность и устойчивость на широком наборе геометрий, лучший выбор — SAC (стабилен везде, ускорение 1.47--2.27$\times$). Если нужен максимальный выигрыш по скорости при условии, что геометрия попадает в распределение обучающих кривых, — PPO (2.13--3.07$\times$ на трёх сценариях, на четвёртом ожидаемо проигрывает). MLP — наиболее консервативный безопасный вариант, который не теряет управляемость, но и не реализует потенциал ускорения. TD3 в текущей конфигурации сопоставим с SAC и показывает, что детерминированные офлайн-актории также пригодны при корректной физике.
+В ходе анализа полученных результатов, можно сказать, что интеллектуальный подход к выбору скорости движения в задаче слежения действительно возможен и демонстрирует удовлетворительные результаты работы.
+Действительно достигнуто увеличение средней скорости движения объекта по заданной траектории при этом соблюдая достаточно высокое качество слежения.
+Наиболее предпочтительной моделью является SAC, так как она демонстрирует баланс между точностью и выполнением поставленной задачи.
+Несмотря на высокие показатели PPO, поперечные ошибки оказываются больше, чем у SAC.
+И выбор между использованием моделей PPO или SAC остается на усмотрение инженеров-проектировщиков, в зависимости от приоритета точности либо скорости движения.
+TD3 после корректировки физической модели показал результаты, сопоставимые с SAC.
+MLP подтвердил применимость более простого supervised-подхода для задачи адаптивного выбора скорости, но демонстрирует снижение качества слежения на участках траектории ранее не встречавшихся.
 
 \section{Выводы по главе}
-В третьей главе был проведён полный цикл экспериментального анализа: от диагностики датасета и графиков обучения до сравнения моделей в замкнутом контуре управления.
-Эксперименты показали, что все исследуемые модели способны повысить среднюю скорость движения по сравнению с baseline-режимом, однако делают это по-разному и с разной устойчивостью.
 
-После того, как в физическую модель добавлено аэродинамическое сопротивление (drag = 0.05) и датасет был пересобран с учётом новой физики, проблема разгона дрона до недопустимо высоких скоростей устранена: на всех четырёх тестовых сценариях $\|v\|_\mathrm{final} \le 14$~м/с (терминальная скорость), тогда как ранее модели приводили к разгону свыше 200~м/с.
+В третьей главе были проверены все разработанные модели на наборе тестовых траекторий.
+Во всех случаях удалось получить прирост средней скорости относительно базового режима с постоянным значением $V^\ast$.
+При этом стало видно, что одинаковое качество прогноза ещё не гарантирует одинаковое поведение в замкнутом контуре.
 
-Наиболее равномерный результат на полном наборе бенчмарков демонстрирует SAC: устойчивая работа на всех четырёх кривых при ускорении 1.5--2.3$\times$. PPO даёт наибольшее ускорение (до 3.07$\times$) на трёх из четырёх сценариев, но разделяет с MLP проблему OOD-расхождения на helix\_r2. TD3 после фиксации физики работает стабильно везде и сопоставим с SAC по качеству. MLP остаётся наиболее консервативным и легко интерпретируемым вариантом.
+Наиболее предсказуемо себя показали модели SAC и TD3.
+Они сохраняли устойчивое движение на всех сценариях и при этом давали умеренный прирост скорости.
+MLP демонстрировала высокое качество на траекториях, похожих на данные, используемые в обучении, однако хуже переносилась на более сложные геометрии.
+PPO также оставалась работоспособной, но характеризовалась меньшей вариативностью выбора скоростного режима и слабее адаптировалась к текущему состоянию системы.
+
+В целом проведённые эксперименты показали, что использование обучаемого модуля выбора скорости позволяет повысить эффективность движения без отказа от аналитического регулятора.
+Наиболее удачным компромиссом между ускорением и качеством слежения в данной работе оказалась модель SAC.
+Ее агрессивный режим движения и на части сценариев демонстрирует максимальный прирост средней скорости, однако при этом оказывается более чувствительным к сложной геометрии траектории и качеству ограничений системы.

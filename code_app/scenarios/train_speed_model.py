@@ -70,23 +70,23 @@ def plot_prediction_quality(
     """Plot prediction quality diagnostics."""
     err = y_pred - y_true
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(16, 4))
+
+    # ax = axes[0]
+    # lim_lo = min(y_true.min(), y_pred.min()) - 0.05
+    # lim_hi = max(y_true.max(), y_pred.max()) + 0.05
+    # ax.scatter(y_true, y_pred, s=5, alpha=0.35, color="steelblue")
+    # ax.plot([lim_lo, lim_hi], [lim_lo, lim_hi], "r--", linewidth=1.5, label="Идеальная линия")
+    # ax.set_xlabel("$V_{\\mathrm{opt}}$ истинное")
+    # ax.set_ylabel("$V_{\\mathrm{opt}}$ предсказанное")
+    # ax.set_title("Предсказание vs целевое значение")
+    # ax.legend()
+    # ax.grid(True, linestyle="--", alpha=0.5)
+    # ax.set_xlim(lim_lo, lim_hi)
+    # ax.set_ylim(lim_lo, lim_hi)
+    # ax.set_aspect("equal")
 
     ax = axes[0]
-    lim_lo = min(y_true.min(), y_pred.min()) - 0.05
-    lim_hi = max(y_true.max(), y_pred.max()) + 0.05
-    ax.scatter(y_true, y_pred, s=5, alpha=0.35, color="steelblue")
-    ax.plot([lim_lo, lim_hi], [lim_lo, lim_hi], "r--", linewidth=1.5, label="Идеальная линия")
-    ax.set_xlabel("$V_{\\mathrm{opt}}$ истинное")
-    ax.set_ylabel("$V_{\\mathrm{opt}}$ предсказанное")
-    ax.set_title("Предсказание vs целевое значение")
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.set_xlim(lim_lo, lim_hi)
-    ax.set_ylim(lim_lo, lim_hi)
-    ax.set_aspect("equal")
-
-    ax = axes[1]
     ax.hist(err, bins=40, color="coral", edgecolor="white")
     ax.axvline(0, color="black", linewidth=1.2, linestyle="--")
     mae = float(np.mean(np.abs(err)))
@@ -98,28 +98,38 @@ def plot_prediction_quality(
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
 
-    ax = axes[2]
+    ax = axes[1]
     n_bins = 8
     edges = np.linspace(y_true.min(), y_true.max(), n_bins + 1)
-    centers, means, stds = [], [], []
+
+    centers, maes, counts = [], [], []
+
     for i in range(n_bins):
         mask = (y_true >= edges[i]) & (y_true < edges[i + 1])
+        if i == n_bins - 1:
+            mask = (y_true >= edges[i]) & (y_true <= edges[i + 1])
+
         if mask.sum() > 0:
             centers.append((edges[i] + edges[i + 1]) / 2)
-            means.append(float(np.mean(err[mask])))
-            stds.append(float(np.std(err[mask])))
+            maes.append(float(np.mean(np.abs(err[mask]))))
+            counts.append(int(mask.sum()))
+
     centers = np.array(centers)
-    means = np.array(means)
-    stds = np.array(stds)
-    ax.bar(centers, stds, width=(edges[1] - edges[0]) * 0.7,
-           color="steelblue", alpha=0.7, label="СКО ошибки")
-    ax.plot(centers, means, "ro-", markersize=5, label="Среднее ошибки")
-    ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
+    maes = np.array(maes)
+
+    ax.bar(
+        centers,
+        maes,
+        width=(edges[1] - edges[0]) * 0.7,
+        color="steelblue",
+        alpha=0.75,
+        edgecolor="white"
+    )
+
     ax.set_xlabel("Диапазон $V_{\\mathrm{opt}}$, м/с")
-    ax.set_ylabel("Ошибка предсказания, м/с")
-    ax.set_title("Ошибка по диапазону целевой скорости")
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_ylabel("MAE, м/с")
+    ax.set_title("MAE по диапазонам целевой скорости")
+    ax.grid(True, linestyle="--", alpha=0.5, axis="y")
 
     fig.tight_layout()
     p = os.path.join(out_dir, "prediction_quality.png")
@@ -172,6 +182,11 @@ def main() -> None:
     parser.add_argument("--patience", type=int,   default=20,   help="Early stopping patience")
     parser.add_argument("--val-frac", type=float, default=0.2,  help="Validation fraction")
     parser.add_argument("--seed",     type=int,   default=42)
+    parser.add_argument("--dropout",  type=float, default=0.0,
+                        help="Dropout p между скрытыми слоями SpeedMLP "
+                             "(0.0 = старая архитектура без Dropout)")
+    parser.add_argument("--weight-decay", type=float, default=5e-4,
+                        help="L2-регуляризация в Adam (помогает на helix_r2)")
     parser.add_argument("--plots-dir",default=_DEFAULT_PLOTS,   help="Plot output directory")
     parser.add_argument("--no-plots", action="store_true",       help="Skip plot generation")
     # --- Drone params: must match the values used in run_build_dataset.py ---
@@ -204,6 +219,7 @@ def main() -> None:
     print(f"  Model    : {args.out}")
     print(f"  Epochs   : {args.epochs}  patience={args.patience}")
     print(f"  LR       : {args.lr}  batch={args.batch}")
+    print(f"  Reg      : dropout={args.dropout}  weight_decay={args.weight_decay}")
     print(f"  Drone    : max_speed={drone.max_speed}  min_speed={drone.min_speed}")
     print(f"             lateral_e_lim={drone.lateral_error_limit}  "
           f"tang_e_lim={drone.tangential_error_limit}  "
@@ -220,6 +236,8 @@ def main() -> None:
         patience=args.patience,
         seed=args.seed,
         drone=drone,
+        dropout=args.dropout,
+        weight_decay=args.weight_decay,
     )
 
     X, y = load_dataset(args.csv)

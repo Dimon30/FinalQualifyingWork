@@ -104,6 +104,9 @@ def save_speed_model_any(
             "state_dict":   model.state_dict(),
             "max_speed":    model.max_speed,
             "input_size":   model.input_size,
+            # dropout релевантен только для SpeedMLP; для остальных пишем 0.0
+            # для согласованности формата (поле игнорируется при загрузке).
+            "dropout":      float(getattr(model, "dropout", 0.0)),
             "drone_params": drone_params,
         },
         path,
@@ -131,10 +134,17 @@ def load_speed_model_any(
         )
         model_type = "mlp"
 
-    model = _MODEL_REGISTRY[model_type](
+    # Только для SpeedMLP конструктор принимает dropout; его значение определяет
+    # структуру Sequential (без Dropout-слоёв при dropout=0). Для других моделей
+    # передавать dropout нельзя — у них нет такого параметра.
+    kwargs = dict(
         max_speed=checkpoint["max_speed"],
         input_size=checkpoint["input_size"],
     )
+    if model_type == "mlp":
+        kwargs["dropout"] = float(checkpoint.get("dropout", 0.0))
+
+    model = _MODEL_REGISTRY[model_type](**kwargs)
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     return model

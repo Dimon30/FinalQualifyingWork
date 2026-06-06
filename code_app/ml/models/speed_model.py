@@ -20,20 +20,34 @@ class SpeedMLP(nn.Module):
         self,
         max_speed: float = 10.0,
         input_size: int = INPUT_SIZE,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.max_speed = float(max_speed)
         self.input_size = input_size
+        self.dropout = float(dropout)
 
-        self.net = nn.Sequential(
-            nn.Linear(input_size, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1),
-        )
+        # При dropout=0 — старая структура Sequential (для обратной совместимости
+        # со старыми чекпоинтами, где не было Dropout-слоёв). При dropout>0
+        # добавляем nn.Dropout между ReLU и следующим Linear.
+        if self.dropout > 0.0:
+            layers: list[nn.Module] = [
+                nn.Linear(input_size, 128), nn.ReLU(),
+                nn.Dropout(self.dropout),
+                nn.Linear(128, 128), nn.ReLU(),
+                nn.Dropout(self.dropout),
+                nn.Linear(128, 64), nn.ReLU(),
+                nn.Dropout(self.dropout),
+                nn.Linear(64, 1),
+            ]
+        else:
+            layers = [
+                nn.Linear(input_size, 128), nn.ReLU(),
+                nn.Linear(128, 128), nn.ReLU(),
+                nn.Linear(128, 64), nn.ReLU(),
+                nn.Linear(64, 1),
+            ]
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the network and scale output to ``(0, max_speed)``."""
@@ -57,6 +71,7 @@ class SpeedMLP(nn.Module):
             f"SpeedMLP("
             f"input={self.input_size}, "
             f"hidden=[128, 128, 64], "
+            f"dropout={self.dropout}, "
             f"out=sigmoid*{self.max_speed}, "
             f"params={total:,})"
         )
@@ -96,6 +111,7 @@ def save_speed_model(model: SpeedMLP, path: str, drone=None) -> None:
             "state_dict":   model.state_dict(),
             "max_speed":    model.max_speed,
             "input_size":   model.input_size,
+            "dropout":      getattr(model, "dropout", 0.0),
             "drone_params": drone_params,
         },
         path,
@@ -115,7 +131,12 @@ def load_speed_model(
     """
     checkpoint = torch.load(path, map_location=device, weights_only=True)
     ms = max_speed if max_speed is not None else checkpoint["max_speed"]
-    model = SpeedMLP(max_speed=ms, input_size=checkpoint["input_size"])
+    dp = float(checkpoint.get("dropout", 0.0))
+    model = SpeedMLP(
+        max_speed=ms,
+        input_size=checkpoint["input_size"],
+        dropout=dp,
+    )
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     return model

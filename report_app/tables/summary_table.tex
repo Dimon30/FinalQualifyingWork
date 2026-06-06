@@ -1,69 +1,47 @@
-\begin{table}[H]
-
-    \caption{Сравнительные показатели моделей оптимизации $V^*$ на тестовом наборе кривых (бенчмарк после фикса физики: drag=0.05, dataset\_v2)}
-    \label{tab:model_benchmark}
-    \centering
-    \small
-
-    \renewcommand{\arraystretch}{1.15}
-
-    \resizebox{\textwidth}{!}{%
-
-        \begin{tabular}{|p{2.5cm}|p{2.9cm}|c|c|c|c|c|c|}
-
-            \hline
-            \textbf{Кривая} & \textbf{Модель} &
-            \textbf{$e_{1,\mathrm{RMS}}$, м} &
-            \textbf{$e_{2,\mathrm{RMS}}$, м} &
-            \textbf{$e_{2,\max}$, м} &
-            \textbf{$\bar{v}$, м/с} &
-            \textbf{Ускорение, $\times$} &
-            \textbf{Сошлось} \\
-            \hline
-            Спираль $r{=}3$            & Константная $V^*$ & 0.0253 & 0.0007  & 0.0024  & 1.002  & ---   & \checkmark \\
-            \cline{2-8}
-            & MLP               & 0.0657 & 0.0243  & 0.1055  & 1.237  & 1.23  & \checkmark \\
-            \cline{2-8}
-            & SAC               & 0.0701 & 0.0244  & 0.0659  & 1.681  & 1.68  & \checkmark \\
-            \cline{2-8}
-            & TD3               & 0.0759 & 0.0161  & 0.0533  & 1.665  & 1.66  & \checkmark \\
-            \cline{2-8}
-            & PPO               & 0.0481 & 0.0196  & 0.0544  & 2.957  & 2.95  & \checkmark \\
-            \hline
-
-            Окружность $r{=}3$         & Константная $V^*$ & 0.0001 & 0.0000  & 0.0002  & 1.003  & ---   & \checkmark \\
-            \cline{2-8}
-            & MLP               & 0.0704 & 0.0078  & 0.0299  & 1.751  & 1.75  & \checkmark \\
-            \cline{2-8}
-            & SAC               & 0.0562 & 0.0157  & 0.0580  & 2.279  & 2.27  & \checkmark \\
-            \cline{2-8}
-            & TD3               & 0.0551 & 0.0148  & 0.0557  & 2.234  & 2.23  & \checkmark \\
-            \cline{2-8}
-            & PPO               & 0.0353 & 0.0024  & 0.0081  & 3.079  & 3.07  & \checkmark \\
-            \hline
-
-            Спираль $r{=}2$            & Константная $V^*$ & 0.0253 & 0.0010  & 0.0034  & 1.001  & ---   & \checkmark \\
-            \cline{2-8}
-            & MLP               & 4.6080 & 18.9212 & 55.1521 & 7.423  & 7.42  & $\times$   \\
-            \cline{2-8}
-            & SAC               & 0.0833 & 0.0301  & 0.1078  & 1.471  & 1.47  & \checkmark \\
-            \cline{2-8}
-            & TD3               & 0.0970 & 0.0961  & 0.2895  & 1.411  & 1.41  & \checkmark \\
-            \cline{2-8}
-            & PPO               & 3.9917 & 11.5150 & 38.9333 & 7.074  & 7.07  & $\times$   \\
-            \hline
-
-            Прямая $x{=}s,y{=}s,z{=}s$ & Константная $V^*$ & 0.0004 & 0.0003  & 0.0012  & 1.000  & ---   & \checkmark \\
-            \cline{2-8}
-            & MLP               & 0.0108 & 0.0677  & 0.2176  & 1.140  & 1.14  & \checkmark \\
-            \cline{2-8}
-            & SAC               & 0.0257 & 0.0554  & 0.1779  & 1.844  & 1.84  & \checkmark \\
-            \cline{2-8}
-            & TD3               & 0.0330 & 0.0453  & 0.1644  & 1.760  & 1.76  & \checkmark \\
-            \cline{2-8}
-            & PPO               & 0.1365 & 0.3985  & 1.4013  & 2.131  & 2.13  & $\times$   \\
-            \hline
-
-        \end{tabular}%
-    }
-\end{table}
+\begingroup
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{longtable}{p{2.7cm}p{2.0cm}rrrrrc}
+\caption{Сравнительные показатели моделей оптимизации $V^*$ на тестовом наборе кривых}\label{tab:model_benchmark}\\
+\toprule
+Кривая & Модель & $e_{1,\mathrm{RMS}}$ & $e_{2,\mathrm{RMS}}$ & $e_{2,\max}$ & $\bar{v}$ & Ускор. & OK \\
+ & & м & м & м & м/с & $\times$ & \\
+\midrule
+\endfirsthead
+\multicolumn{8}{c}{\tablename\ \thetable{} — продолжение} \\
+\toprule
+Кривая & Модель & $e_{1,\mathrm{RMS}}$ & $e_{2,\mathrm{RMS}}$ & $e_{2,\max}$ & $\bar{v}$ & Ускор. & OK \\
+ & & м & м & м & м/с & $\times$ & \\
+\midrule
+\endhead
+\midrule
+\multicolumn{8}{r}{\textit{Продолжение на следующей странице}} \\
+\endfoot
+\bottomrule
+\endlastfoot
+  \multirow{5}{=}{Спираль $r{=}3$} & Константная $V^*$ & 0.0253 & 0.0007 & 0.0024 & 1.002 & --- & \checkmark \\
+   & MLP & 0.0644 & 0.0264 & 0.0752 & 2.117 & 2.11 & \checkmark \\
+   & SAC & 0.0465 & 0.0153 & 0.0494 & 1.113 & 1.11 & \checkmark \\
+   & TD3 & 0.0433 & 0.0099 & 0.0414 & 1.180 & 1.18 & \checkmark \\
+   & PPO & 0.0865 & 0.0410 & 0.1447 & 1.610 & 1.61 & \checkmark \\
+  \midrule
+  \multirow{5}{=}{Окружность $r{=}3$} & Константная $V^*$ & 0.0001 & 0.0000 & 0.0002 & 1.003 & --- & \checkmark \\
+   & MLP & 0.0431 & 0.0121 & 0.0429 & 2.515 & 2.51 & \checkmark \\
+   & SAC & 0.1296 & 0.0254 & 0.0719 & 1.289 & 1.28 & \checkmark \\
+   & TD3 & 0.0817 & 0.0088 & 0.0328 & 1.722 & 1.72 & \checkmark \\
+   & PPO & 0.0547 & 0.0142 & 0.0534 & 2.270 & 2.26 & \checkmark \\
+  \midrule
+  \multirow{5}{=}{Спираль $r{=}2$} & Константная $V^*$ & 0.0253 & 0.0010 & 0.0034 & 1.001 & --- & \checkmark \\
+   & MLP & 0.0716 & 0.0159 & 0.0696 & 1.838 & 1.84 & \checkmark \\
+   & SAC & 0.0763 & 0.0092 & 0.0274 & 1.004 & 1.00 & \checkmark \\
+   & TD3 & 0.0716 & 0.0111 & 0.0352 & 1.030 & 1.03 & \checkmark \\
+   & PPO & 0.0774 & 0.0565 & 0.1989 & 1.417 & 1.42 & \checkmark \\
+  \midrule
+  \multirow{5}{=}{Прямая $x{=}s,y{=}s,z{=}s$} & Константная $V^*$ & 0.0004 & 0.0003 & 0.0012 & 1.000 & --- & \checkmark \\
+   & MLP & 0.1365 & 0.3981 & 1.4013 & 1.918 & 1.92 & $\times$ \\
+   & SAC & 0.0124 & 0.0206 & 0.0673 & 1.098 & 1.10 & \checkmark \\
+   & TD3 & 0.0044 & 0.0417 & 0.1397 & 1.171 & 1.17 & \checkmark \\
+   & PPO & 0.0317 & 0.0396 & 0.1680 & 1.694 & 1.69 & \checkmark \\
+\end{longtable}
+\endgroup

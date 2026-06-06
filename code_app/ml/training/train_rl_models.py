@@ -335,16 +335,24 @@ def train_ppo(
     drone: Optional[QuadModel] = None,
     ppo_eps: float = 0.2,
     ppo_mini_epochs: int = 4,
+    c_bc: float = 1.0,
+    c_policy: float = 0.1,
     c_value: float = 0.5,
     c_entropy: float = 0.01,
 ) -> TrainResult:
-    """Обучить SpeedPPO на датасете V* (offline PPO / BC-PPO).
+    """Обучить SpeedPPO на датасете V* (offline BC-PPO с BC-якорем).
+
+    Главный сигнал обучения — supervised MSE между mean policy и V_opt
+    (BC-якорь). Clipped surrogate выступает мягким регуляризатором с
+    advantage, основанным на качестве предсказания (не на сыром V_opt).
 
     Параметры:
-        ppo_eps        — epsilon для clip(ratio, 1-eps, 1+eps).
+        ppo_eps         — epsilon для clip(ratio, 1-eps, 1+eps).
         ppo_mini_epochs — число мини-эпох PPO на один проход данных.
-        c_value        — коэффициент value loss.
-        c_entropy      — коэффициент энтропийного бонуса.
+        c_bc            — вес BC MSE-якоря (по умолчанию доминирует).
+        c_policy        — вес clipped-surrogate регуляризатора.
+        c_value         — вес value MSE.
+        c_entropy       — вес энтропийного бонуса.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -356,7 +364,22 @@ def train_ppo(
     X, y = load_dataset(csv_path)
     N = len(X)
     log.info("  Сэмплов: %d  Признаков: %d", N, X.shape[1])
-    train_loader, val_loader, n_train, n_val = _make_loaders(X, y, val_frac, batch_size, seed)
+
+    # Стабильный train/val split: индексы фиксированы → батчи режем сами по
+    # фиксированной permutation, чтобы old_log_probs[i] всегда соответствовал
+    # тому же (xb[i], yb[i]) во всех мини-эпохах.
+    X_t = torch.from_numpy(X).float()
+    y_t = torch.from_numpy(y).float()
+    g_split = torch.Generator().manual_seed(seed)
+    n_val = max(1, int(N * val_frac))
+    n_train = N - n_val
+    perm_split = torch.randperm(N, generator=g_split)
+    train_idx = perm_split[:n_train]
+    val_idx = perm_split[n_train:]
+    X_train = X_t[train_idx].to(dev)
+    y_train = y_t[train_idx].to(dev)
+    X_val = X_t[val_idx].to(dev)
+    y_val = y_t[val_idx].to(dev)
     log.info("  Train: %d  Val: %d", n_train, n_val)
 
     model: SpeedPPO = get_speed_model("ppo", max_speed=max_speed).to(dev)
@@ -366,46 +389,68 @@ def train_ppo(
     mse = nn.MSELoss()
     es = _ES(patience)
 
-    # Нормализованное advantage (V_opt centred, 0-mean 1-std).
-    y_tensor = torch.from_numpy(y.flatten()).float()
-    adv_mean = y_tensor.mean().item()
-    adv_std = y_tensor.std().item() + 1e-8
+    g_perm = torch.Generator().manual_seed(seed + 1)
+
+    def _val_mse_tensors() -> float:
+        model.eval()
+        with torch.no_grad():
+            pred = model(X_val)
+            return float(((pred - y_val) ** 2).mean().item())
 
     train_losses, val_losses = [], []
     stopped = n_epochs
     t0 = time.monotonic()
 
     for epoch in range(1, n_epochs + 1):
-        # --- Шаг 1: вычислить old log-probs (без градиентов) ---
+        # Одна фиксированная permutation на эпоху.
+        perm = torch.randperm(n_train, generator=g_perm)
+
+        # --- Шаг 1: old log-probs для всей train-части в порядке perm ---
         model.eval()
-        old_log_probs_list = []
         with torch.no_grad():
-            for xb, yb in train_loader:
-                xb, yb = xb.to(dev), yb.to(dev)
-                lp = model.log_prob(xb, yb)
-                old_log_probs_list.append(lp.cpu())
-        old_log_probs = torch.cat(old_log_probs_list)  # (N_train,)
+            old_log_probs = model.log_prob(X_train[perm], y_train[perm])
+        # Защита от NaN/Inf в old_log_probs — заменяем на 0, чтобы ratio=1
+        # и сурогат не вёл к лоссу-NaN на этом батче.
+        old_log_probs = torch.where(
+            torch.isfinite(old_log_probs),
+            old_log_probs,
+            torch.zeros_like(old_log_probs),
+        )
 
-        # --- Шаг 2: мини-эпохи PPO ---
+        # --- Шаг 2: мини-эпохи PPO с фиксированной нарезкой ---
         model.train()
-        tl = 0.0
+        tl_bc_sum = 0.0
+        n_batches_used = 0
         for _mini in range(ppo_mini_epochs):
-            offset = 0
-            for xb, yb in train_loader:
-                xb, yb = xb.to(dev), yb.to(dev)
-                bs = len(xb)
+            for start in range(0, n_train, batch_size):
+                end = min(start + batch_size, n_train)
+                idx = perm[start:end]
+                xb = X_train[idx]
+                yb = y_train[idx]
+                bs = end - start
 
-                old_lp = old_log_probs[offset:offset + bs].to(dev)
-                offset += bs
+                old_lp = old_log_probs[start:end].detach()
 
                 optimizer.zero_grad()
 
-                # Policy
-                new_lp = model.log_prob(xb, yb)
-                ratio = torch.exp(new_lp - old_lp.detach())
+                mean, std = model.forward_policy(xb)
+                if not (torch.isfinite(mean).all() and torch.isfinite(std).all()):
+                    log.warning(
+                        "PPO: NaN/Inf в policy output (epoch=%d, start=%d), пропускаю батч",
+                        epoch, start,
+                    )
+                    continue
 
-                # Advantage = нормированный V_opt.
-                adv = ((yb - adv_mean) / adv_std).detach()
+                # BC-anchor — главный сигнал.
+                loss_bc = mse(mean, yb)
+
+                # Surrogate с advantage от качества предсказания (не от сырого V_opt).
+                new_lp = model.log_prob(xb, yb)
+                ratio = torch.exp((new_lp - old_lp).clamp(min=-20.0, max=20.0))
+
+                with torch.no_grad():
+                    adv = -((mean.detach() - yb) ** 2) / (max_speed ** 2)
+                    adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
                 l_clip = torch.min(
                     ratio * adv,
@@ -413,28 +458,41 @@ def train_ppo(
                 )
                 loss_policy = -l_clip.mean()
 
-                # Value
                 v_pred = model.forward_value(xb)
                 loss_value = mse(v_pred, yb)
 
-                # Entropy bonus
                 loss_entropy = -model.entropy(xb).mean()
 
-                loss = loss_policy + c_value * loss_value + c_entropy * loss_entropy
+                loss = (
+                    c_bc * loss_bc
+                    + c_policy * loss_policy
+                    + c_value * loss_value
+                    + c_entropy * loss_entropy
+                )
+
+                if not torch.isfinite(loss):
+                    log.warning(
+                        "PPO: non-finite loss (epoch=%d, start=%d), пропускаю шаг",
+                        epoch, start,
+                    )
+                    optimizer.zero_grad()
+                    continue
+
                 loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
-                tl += loss_value.item() * bs  # отслеживаем value loss как прокси
+                tl_bc_sum += loss_bc.item() * bs
+                n_batches_used += bs
 
-        train_loss = tl / (n_train * ppo_mini_epochs)
-        val_loss = _val_mse(model, val_loader, dev)
+        train_loss = tl_bc_sum / max(n_batches_used, 1)
+        val_loss = _val_mse_tensors()
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
         if epoch % 20 == 0 or epoch == 1:
             log.info(
-                "Epoch %4d/%d  value_loss=%.5f  val_MSE=%.5f  (%.1fs)",
+                "Epoch %4d/%d  bc_loss=%.5f  val_MSE=%.5f  (%.1fs)",
                 epoch, n_epochs, train_loss, val_loss, time.monotonic() - t0,
             )
 
@@ -510,7 +568,8 @@ def train_rl(
 
     elif model_name == "ppo":
         ppo_kw = {k: v for k, v in extra.items()
-                  if k in ("ppo_eps", "ppo_mini_epochs", "c_value", "c_entropy")}
+                  if k in ("ppo_eps", "ppo_mini_epochs",
+                           "c_bc", "c_policy", "c_value", "c_entropy")}
         if "lr" not in ppo_kw:
             common["lr"] = min(lr, 3e-4)  # PPO предпочитает меньший lr
         return train_ppo(**common, **ppo_kw)

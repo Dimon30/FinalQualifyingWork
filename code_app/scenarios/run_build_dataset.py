@@ -11,6 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -48,10 +49,12 @@ def plot_dataset_stats(csv_path: str, out_dir: str) -> None:
 
     # Distribution of V_opt and curvature.
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    axes[0].hist(data["V_opt"], bins=70, color="steelblue", edgecolor="white")
+    v_opt = data["V_opt"]
+    axes[0].hist(v_opt, bins=np.linspace(v_opt.min() - 0.25, v_opt.max() + 0.25, 16), color="steelblue", edgecolor="white")
+    # axes[0].violinplot(data["V_opt"])
     axes[0].set_xlabel("$V_{\\mathrm{opt}}$, м/с")
     axes[0].set_ylabel("Количество")
-    axes[0].set_title(f"Распределение целевой скорости (N={N})")
+    axes[0].set_title(f"Распределение целевой скорости")
     axes[0].grid(True, linestyle="--", alpha=0.6)
 
     axes[1].hist(data["kappa"], bins=30, color="coral", edgecolor="white")
@@ -66,62 +69,105 @@ def plot_dataset_stats(csv_path: str, out_dir: str) -> None:
     plt.close(fig)
     print(f"  График: {display_path(p)}")
 
-    # Feature-to-target scatter plots.
+    # Feature-to-target aggregated plots.
     feature_cols = ["e1", "e2", "de2_dt", "v_norm",
                     "heading_error", "kappa", "kappa_max_lookahead"]
     present = [c for c in feature_cols if c in data]
 
-    n_f = len(present)
+    n_bins = 8
     cols_per_row = 4
+    n_f = len(present)
     nrows = (n_f + cols_per_row - 1) // cols_per_row
     fig, axes = plt.subplots(nrows, cols_per_row, figsize=(cols_per_row * 4, nrows * 3))
     axes = np.array(axes).flatten()
 
     for i, col in enumerate(present):
         ax = axes[i]
-        ax.scatter(data[col], data["V_opt"], s=4, alpha=0.4, color="steelblue")
-        try:
-            z = np.polyfit(data[col], data["V_opt"], 1)
-            xline = np.linspace(data[col].min(), data[col].max(), 50)
-            ax.plot(xline, np.polyval(z, xline), "r-", linewidth=1.5)
-        except Exception:
-            pass
-        # column names стандартные (e1, e2, kappa, …) — оставляем как переменные
+
+        x = np.asarray(data[col])
+        y = np.asarray(data["V_opt"])
+
+        bins = np.linspace(np.nanmin(x), np.nanmax(x), n_bins + 1)
+        bin_ids = np.digitize(x, bins) - 1
+
+        centers = []
+        means = []
+        stds = []
+        counts = []
+
+        for b in range(n_bins):
+            mask = bin_ids == b
+            if mask.sum() == 0:
+                continue
+
+            centers.append((bins[b] + bins[b + 1]) / 2)
+            means.append(np.nanmean(y[mask]))
+            stds.append(np.nanstd(y[mask]))
+            counts.append(mask.sum())
+
+        ax.plot(
+            centers,
+            means,
+            "o-",
+            linewidth=2,
+            markersize=4
+        )
+        # ax.set_ylim(data["V_opt"].min() - 0.2, data["V_opt"].max() + 0.2)
+
         ax.set_xlabel(f"${col}$" if col in {"e1", "e2", "kappa"} else col)
         ax.set_ylabel("$V_{\\mathrm{opt}}$, м/с")
-        title_col = f"${col}$" if col in {"e1", "e2", "kappa"} else col
-        ax.set_title(f"{title_col} vs $V_{{\\mathrm{{opt}}}}$")
+        ax.set_title(f"{col}: среднее $V_{{\\mathrm{{opt}}}}$ по интервалам")
         ax.grid(True, linestyle="--", alpha=0.5)
 
     for j in range(n_f, len(axes)):
         axes[j].set_visible(False)
 
-    fig.suptitle("Зависимости признаков и целевой скорости", fontsize=13)
+    fig.suptitle("Зависимость целевой скорости от признаков датасета", fontsize=13)
     fig.tight_layout()
     p = os.path.join(out_dir, "dataset_features_scatter.png")
     fig.savefig(p, dpi=150)
     plt.close(fig)
     print(f"  График: {display_path(p)}")
 
-    # Correlation with V_opt.
-    corrs = []
-    for col in present:
-        c = float(np.corrcoef(data[col], data["V_opt"])[0, 1])
-        corrs.append((col, c))
-    corrs.sort(key=lambda x: abs(x[1]), reverse=True)
+    # Spearman correlation matrix.
+    corr_cols = present + ["V_opt"]
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    names = [c[0] for c in corrs]
-    vals = [c[1] for c in corrs]
-    colors = ["steelblue" if v >= 0 else "coral" for v in vals]
-    ax.barh(names, vals, color=colors, edgecolor="white")
-    ax.axvline(0, color="black", linewidth=0.8)
-    ax.set_xlabel("Корреляция Пирсона с $V_{\\mathrm{opt}}$")
-    ax.set_title("Корреляция признаков с целевой скоростью")
-    ax.grid(True, linestyle="--", alpha=0.5, axis="x")
+    corr_df = pd.DataFrame({
+        c: np.asarray(data[c])
+        for c in corr_cols
+    })
+
+    corr_matrix = corr_df.corr(method="spearman").values
+
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+    corr_masked = np.ma.array(corr_matrix, mask=mask)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    im = ax.imshow(
+        corr_masked,
+        vmin=-1,
+        vmax=1,
+        cmap="coolwarm"
+    )
+
+    ax.set_xticks(np.arange(len(corr_cols)))
+    ax.set_yticks(np.arange(len(corr_cols)))
+    ax.set_xticklabels(corr_cols, rotation=45, ha="right")
+    ax.set_yticklabels(corr_cols)
+
+    for i in range(len(corr_cols)):
+        for j in range(len(corr_cols)):
+            if not mask[i, j]:
+                ax.text(j, i, f"{corr_matrix[i, j]:.2f}",
+                        ha="center", va="center", fontsize=8)
+
+    ax.set_title("Матрица корреляций Спирмена")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
     fig.tight_layout()
     p = os.path.join(out_dir, "dataset_correlations.png")
-    fig.savefig(p, dpi=150)
+    fig.savefig(p, dpi=150, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
     print(f"  График: {display_path(p)}")
 

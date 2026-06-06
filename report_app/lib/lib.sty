@@ -29,6 +29,7 @@
 \RequirePackage{color}
 \RequirePackage{xcolor}
 \RequirePackage{caption}
+\captionsetup[figure]{labelsep=endash}
 \RequirePackage{subcaption}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -41,7 +42,10 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % --- ССЫЛКИ И БИБЛИОГРАФИЯ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\RequirePackage{hyperref}
+\RequirePackage[
+    unicode=true,
+    hidelinks
+]{hyperref}
 \RequirePackage{csquotes}
 \RequirePackage[backend=biber,sorting=none]{biblatex}
 
@@ -77,6 +81,18 @@
 % --- ОФОРМЛЕНИЕ ЗАГОЛОВКОВ ---
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \RequirePackage{titlesec}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\hyphenpenalty=10000\exhyphenpenalty=10000}
+  {\thesection}{1em}{}
+
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\hyphenpenalty=10000\exhyphenpenalty=10000}
+  {\thesubsection}{1em}{}
+
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\hyphenpenalty=10000\exhyphenpenalty=10000}
+  {\thesubsubsection}{1em}{}
 
 \titleformat{\chapter}[hang]
   {\normalfont\LARGE\bfseries}

@@ -1,9 +1,0 @@
-[0] Config.pm:328> INFO - This is Biber 2.21
-[0] Config.pm:331> INFO - Logfile is 'report.blg'
-[23] biber-darwin:342> INFO - === Mon May 18, 2026, 02:03:17
-[29] Biber.pm:421> INFO - Reading 'report.bcf'
-[52] Biber.pm:1002> INFO - Found 15 citekeys in bib section 0
-[56] Biber.pm:4487> INFO - Processing section 0
-[60] Biber.pm:4678> INFO - Looking for bibtex file 'references.bib' for section 0
-[60] bibtex.pm:1713> INFO - LaTeX decoding ...
-[64] bibtex.pm:1519> INFO - Found BibTeX data source 'references.bib'

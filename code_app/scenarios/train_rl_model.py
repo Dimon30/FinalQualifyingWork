@@ -127,60 +127,76 @@ def plot_quality(
     out_dir: str,
 ) -> None:
     err = y_pred - y_true
+    abs_err = np.abs(err)
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+    mae = float(np.mean(abs_err))
+    rmse = float(np.sqrt(np.mean(err ** 2)))
 
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    # 1. Распределение ошибок
     ax = axes[0]
-    lo = min(y_true.min(), y_pred.min()) - 0.05
-    hi = max(y_true.max(), y_pred.max()) + 0.05
-    ax.scatter(y_true, y_pred, s=5, alpha=0.35, color="steelblue")
-    ax.plot([lo, hi], [lo, hi], "r--", linewidth=1.5, label="Идеальная линия")
-    ax.set_xlabel("$V_{\\mathrm{opt}}$ истинное")
-    ax.set_ylabel("$V_{\\mathrm{opt}}$ предсказанное")
-    ax.set_title(f"{model_name.upper()} — предсказание vs целевое значение")
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.set_aspect("equal")
-
-    ax = axes[1]
-    ax.hist(err, bins=40, color="coral", edgecolor="white")
-    mae = float(np.mean(np.abs(err)))
-    ax.axvline(0, color="black", linewidth=1.2, linestyle="--")
-    ax.axvline(mae, color="red", linestyle=":", linewidth=1.5, label=f"MAE={mae:.4f}")
+    ax.hist(err, bins=40, color="coral", edgecolor="white", alpha=0.85)
+    ax.axvline(0, color="black", linewidth=1.2, linestyle="--", label="Нулевая ошибка")
+    ax.axvline(mae, color="red", linestyle=":", linewidth=1.5, label=f"MAE={mae:.3f}")
     ax.axvline(-mae, color="red", linestyle=":", linewidth=1.5)
-    ax.set_xlabel("Ошибка предсказания, м/с")
+    ax.set_xlabel("Ошибка $\\hat{V}_{\\mathrm{opt}} - V_{\\mathrm{opt}}$, м/с")
     ax.set_ylabel("Количество")
-    ax.set_title("Распределение ошибок предсказания")
+    ax.set_title("Распределение ошибок")
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.5)
 
-    ax = axes[2]
-    n_bins = 8
+    # 2. MAE по диапазонам скорости
+    ax = axes[1]
+    n_bins = 6
     edges = np.linspace(y_true.min(), y_true.max(), n_bins + 1)
-    centers, means, stds = [], [], []
+
+    centers, maes, counts = [], [], []
+
     for i in range(n_bins):
         mask = (y_true >= edges[i]) & (y_true < edges[i + 1])
-        if mask.sum() > 0:
-            centers.append((edges[i] + edges[i + 1]) / 2)
-            means.append(float(np.mean(err[mask])))
-            stds.append(float(np.std(err[mask])))
-    centers_arr = np.array(centers)
-    w = (edges[1] - edges[0]) * 0.7
-    ax.bar(centers_arr, stds, width=w, color="steelblue", alpha=0.7, label="СКО ошибки")
-    ax.plot(centers_arr, means, "ro-", markersize=5, label="Среднее ошибки")
-    ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
+        if i == n_bins - 1:
+            mask = (y_true >= edges[i]) & (y_true <= edges[i + 1])
+
+        if mask.sum() == 0:
+            continue
+
+        centers.append((edges[i] + edges[i + 1]) / 2)
+        maes.append(float(np.mean(abs_err[mask])))
+        counts.append(int(mask.sum()))
+
+    centers = np.array(centers)
+    maes = np.array(maes)
+
+    width = (edges[1] - edges[0]) * 0.7
+
+    ax.bar(
+        centers,
+        maes,
+        width=width,
+        color="steelblue",
+        alpha=0.8,
+        edgecolor="white"
+    )
+
+    ax.axhline(mae, color="red", linestyle=":", linewidth=1.5, label=f"Общий MAE={mae:.3f}")
     ax.set_xlabel("Диапазон $V_{\\mathrm{opt}}$, м/с")
-    ax.set_ylabel("Ошибка предсказания, м/с")
-    ax.set_title("Ошибка по диапазону целевой скорости")
+    ax.set_ylabel("MAE, м/с")
+    ax.set_title("MAE по диапазонам целевой скорости")
     ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.grid(True, linestyle="--", alpha=0.5, axis="y")
+
+    fig.suptitle(
+        f"{model_name.upper()}: качество аппроксимации "
+        f"$V_{{\\mathrm{{opt}}}}$ (MAE={mae:.3f}, RMSE={rmse:.3f})",
+        fontsize=13
+    )
 
     fig.tight_layout()
     p = os.path.join(out_dir, f"{model_name}_quality.png")
-    fig.savefig(p, dpi=150)
+    fig.savefig(p, dpi=150, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
     print(f"  Quality plot : {display_path(p)}")
-
 
 # ---------------------------------------------------------------------------
 # CLI

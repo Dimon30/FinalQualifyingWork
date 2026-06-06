@@ -118,6 +118,8 @@ def train(
     seed: int = 42,
     device: str = "cpu",
     drone: Optional[QuadModel] = None,
+    dropout: float = 0.0,
+    weight_decay: float = 5e-4,
 ) -> TrainResult:
     """Train ``SpeedMLP`` and save the best checkpoint.
 
@@ -165,15 +167,22 @@ def train(
 
     # Model, optimizer, loss.
     dev = torch.device(device)
-    model = SpeedMLP(max_speed=max_speed, input_size=INPUT_SIZE).to(dev)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    model = SpeedMLP(
+        max_speed=max_speed,
+        input_size=INPUT_SIZE,
+        dropout=dropout,
+    ).to(dev)
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=lr, weight_decay=weight_decay,
+    )
     criterion = nn.MSELoss()
     early_stop = _EarlyStopping(patience=patience)
 
     log.info("Model: %s", model)
     log.info(
-        "Training: epochs=%d  batch=%d  lr=%.0e  patience=%d  device=%s",
-        n_epochs, batch_size, lr, patience, device,
+        "Training: epochs=%d  batch=%d  lr=%.0e  patience=%d  "
+        "dropout=%.2f  weight_decay=%.0e  device=%s",
+        n_epochs, batch_size, lr, patience, dropout, weight_decay, device,
     )
 
     train_losses: list[float] = []
